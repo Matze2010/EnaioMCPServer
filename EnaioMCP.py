@@ -20,8 +20,8 @@ mcp = FastMCP("Enaio MCP Server")
 @mcp.tool
 async def get_case_metadata(reference: Annotated[str, "case reference number"], ctx: Context) -> dict:
         """
-        Allows clients or AI agents to retrieve a list of metadata associated with a specific case in the record management system. Each case is identified by a unique reference number, wich must be supplied in the request. The result is provided as JSON dictionary of metadata associated with this case.
-        :param reference: Reference number of a specific case
+        Lese die Metadaten zu einem laufenden Vorgang aus dem Vorgangsbearbeitungssystem.
+        :param reference: Vorgangsnummer
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
@@ -34,8 +34,8 @@ async def get_case_metadata(reference: Annotated[str, "case reference number"], 
 @mcp.tool
 async def list_case_documents(reference: Annotated[str, "case reference number"], ctx: Context) -> List:
         """
-        Allows clients or AI agents to retrieve a list of existing documents filed in a specific case in the record management system and their metadata. The unqiue reference number of the case must be supplied. The result is provided as an array of JSON dictionaries for each document.
-        :param reference: Reference number of a specific case
+        Erstelle eine Liste aller Dokumente, die zu einem laufenden Vorgang gehören.
+        :param reference: Vorgangsnummer
         """
 
         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference}")
@@ -50,8 +50,8 @@ async def list_case_documents(reference: Annotated[str, "case reference number"]
 @mcp.resource("document://{document_nr}/text")
 async def download_document_text_content(document_nr: str, ctx: Context) -> str:
         """
-        Allows clients or AI agents to download document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as text extract.
-        :param document_nr: Document number of a specific document
+        Lade den Inhalt eines Dokuments als reiner Text.
+        :param document_nr: Dokumenten-Nr
         """
 
         await ctx.info(f"Lade Textinhalt zum Dokument {document_nr}")
@@ -63,8 +63,8 @@ async def download_document_text_content(document_nr: str, ctx: Context) -> str:
 @mcp.resource("document://{document_nr}/file")
 async def download_document_file(document_nr: str, ctx: Context) -> str:
         """
-        Allows clients or AI agents to download document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as binary.
-        :param document_nr: Document number of a specific document
+        Lade ein Dokument als Datei.
+        :param document_nr: Dokumenten-Nr
         """
 
         await ctx.info(f"Lade Datei zum Dokument {document_nr}")
