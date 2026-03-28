@@ -172,16 +172,18 @@ class EnaioBackend:
 
             for child in children:
                 childDict = EnaioDict(child)
+                document_nr = hildDict.property("documentIdentifier")
 
                 documents.append(
                     {
                         "type": config["type"],
-                        "document_nr": childDict.property("documentIdentifier"),
+                        "document_nr": document_nr,
                         "name": childDict.property("documentTitle"),
                         "creationDate": childDict.property("system:creationDate"),
                         "lastModificationDate": childDict.property(
                             "system:lastModificationDate"
                         ),
+                        "resource": f"document://{document_nr}/text"
                     }
                 )
 
