@@ -74,6 +74,7 @@ async def download_document_file(document_nr: str, ctx: Context) -> str:
         return document["content"]
 
 
+mcp.add_transform(ResourcesAsTools(mcp))
+
 if __name__ == "__main__":
-    mcp.add_transform(ResourcesAsTools(mcp))
     mcp.run(transport="http", port=8000)
