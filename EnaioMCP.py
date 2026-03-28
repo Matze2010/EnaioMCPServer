@@ -50,7 +50,7 @@ async def list_case_documents(reference: Annotated[str, "case reference number"]
 @mcp.resource("document://{document_nr}/text")
 async def download_document_text_content(document_nr: str, ctx: Context) -> str:
         """
-        Allows clients or AI agents to read document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as JSON dictionary.
+        Allows clients or AI agents to read document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as text extract.
         :param document_nr: Document number of a specific document
         """
 
@@ -63,7 +63,7 @@ async def download_document_text_content(document_nr: str, ctx: Context) -> str:
 @mcp.resource("document://{document_nr}/file")
 async def download_document_file(document_nr: str, ctx: Context) -> str:
         """
-        Allows clients or AI agents to read document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as JSON dictionary.
+        Allows clients or AI agents to read document contents. Each document is identified by a unique document number, wich must be supplied in the request. The document's content is provided as binary.
         :param document_nr: Document number of a specific document
         """
 
