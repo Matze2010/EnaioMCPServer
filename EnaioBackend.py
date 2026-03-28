@@ -189,7 +189,7 @@ class EnaioBackend:
                 "Children for ParentObjectId %s: %s", parentObjectId, children
             )
 
-        return documents
+        return {"reference_nr": parentObjectId, "documents": documents }
 
     async def getDocument(self, documentId, format):
 
