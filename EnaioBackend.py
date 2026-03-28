@@ -172,7 +172,7 @@ class EnaioBackend:
 
             for child in children:
                 childDict = EnaioDict(child)
-                document_nr = hildDict.property("documentIdentifier")
+                document_nr = childDict.property("documentIdentifier")
 
                 documents.append(
                     {
