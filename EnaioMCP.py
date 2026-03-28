@@ -44,7 +44,7 @@ async def list_case_documents(reference: Annotated[str, "case reference number"]
         akte = await backend.getAktenzeichen(reference)
         result = await backend.getDocumentList(akte[0])
 
-        return result
+        return {"reference_nr": reference, "documents": result }
 
 
 @mcp.resource("document://{document_nr}/text")
