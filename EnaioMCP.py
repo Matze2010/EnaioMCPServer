@@ -2,6 +2,7 @@ import os
 import json
 
 from fastmcp import FastMCP, Context
+from fastmcp.server.transforms import ResourcesAsTools
 from typing import Annotated, List
 from EnaioBackend import EnaioBackend
 
@@ -74,4 +75,5 @@ async def download_document_file(document_nr: str, ctx: Context) -> str:
 
 
 if __name__ == "__main__":
+    mcp.add_transform(ResourcesAsTools(mcp))
     mcp.run(transport="http", port=8000)
