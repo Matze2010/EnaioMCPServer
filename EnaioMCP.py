@@ -47,10 +47,10 @@ async def list_case_documents(reference: Annotated[str, "case reference number"]
         return {"reference_nr": reference, "documents": result }
 
 
-@mcp.resource("document://{document_nr}/text")
-async def access_document_content_text(document_nr: str, ctx: Context) -> str:
+@mcp.resource("document://{document_nr}/fulltext")
+async def access_document_fulltext(document_nr: str, ctx: Context) -> str:
         """
-        Access document contents. The document's content is provided as text representation.
+        Access documents fulltext. The document's content is provided as text representation.
         :param document_nr: Dokumenten-Nr
         """
 
