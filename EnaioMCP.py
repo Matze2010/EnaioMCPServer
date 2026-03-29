@@ -48,9 +48,9 @@ async def list_case_documents(reference: Annotated[str, "case reference number"]
 
 
 @mcp.resource("document://{document_nr}/text")
-async def download_document_text_content(document_nr: str, ctx: Context) -> str:
+async def access_document_content_text(document_nr: str, ctx: Context) -> str:
         """
-        Lade den Inhalt eines Dokuments als reiner Text.
+        Access document contents. The document's content is provided as text representation.
         :param document_nr: Dokumenten-Nr
         """
 
@@ -61,9 +61,9 @@ async def download_document_text_content(document_nr: str, ctx: Context) -> str:
         return document["content"]
 
 @mcp.resource("document://{document_nr}/file")
-async def download_document_file(document_nr: str, ctx: Context) -> str:
+async def download_document(document_nr: str, ctx: Context) -> str:
         """
-        Lade ein Dokument als Datei.
+        Access document and download as file. The document's content is provided as binary representation.
         :param document_nr: Dokumenten-Nr
         """
 
