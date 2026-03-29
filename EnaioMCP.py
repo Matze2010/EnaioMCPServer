@@ -1,8 +1,8 @@
 import os
 import json
+import base64
 
 from fastmcp import FastMCP, Context
-from fastmcp.server.transforms import ResourcesAsTools
 from typing import Annotated, List
 from EnaioBackend import EnaioBackend
 
@@ -25,9 +25,10 @@ async def get_case_metadata(reference: Annotated[str, "case reference number"], 
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
-
         akte, record = await backend.getAktenzeichen(reference)
-        documents = await backend.getDocumentList(akte[0])
+
+        await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference} ({akte})")
+        documents = await backend.getDocumentList(akte)
         record["documents"] = documents
 
         return record
@@ -49,11 +50,40 @@ async def get_case_metadata(reference: Annotated[str, "case reference number"], 
 #         return {"reference_nr": reference, "documents": result }
 
 
-@mcp.resource("document://{document}/fulltext")
-async def access_document_fulltext(document: str, ctx: Context) -> str:
+@mcp.tool
+async def access_document_fulltext(document: Annotated[str, "ID of the document"], ctx: Context) -> str:
         """
         Access documents fulltext. The document's content is provided as text representation.
-        :param document: Dokumenten-Nr
+        :param document: Dokument-ID
+        """
+
+        await ctx.info(f"Lade Textinhalt zum Dokument {document}")
+
+        document, json = await backend.getDocument(document, "text")
+
+        return document["content"]
+
+
+@mcp.tool
+async def download_document(document: Annotated[str, "ID of the document"], ctx: Context) -> str:
+        """
+        Access document and download as file. The document's content is provided as binary representation.
+        :param document_nr: Dokument-ID
+        """
+
+        await ctx.info(f"Lade Datei zum Dokument {document}")
+
+        document, json = await backend.getDocument(document, "file")
+
+        return base64.b64encode(document["content"])
+
+
+
+@mcp.resource("document://{document}/fulltext")
+async def resource_access_document_fulltext(document: str, ctx: Context) -> str:
+        """
+        Access documents fulltext. The document's content is provided as text representation.
+        :param document: Dokument-ID
         """
 
         await ctx.info(f"Lade Textinhalt zum Dokument {document}")
@@ -63,10 +93,10 @@ async def access_document_fulltext(document: str, ctx: Context) -> str:
         return document["content"]
 
 @mcp.resource("document://{document}/file")
-async def download_document(document: str, ctx: Context) -> str:
+async def resource_download_document(document: str, ctx: Context) -> str:
         """
         Access document and download as file. The document's content is provided as binary representation.
-        :param document_nr: Dokumenten-Nr
+        :param document_nr: Dokument-ID
         """
 
         await ctx.info(f"Lade Datei zum Dokument {document}")
@@ -74,9 +104,6 @@ async def download_document(document: str, ctx: Context) -> str:
         document, json = await backend.getDocument(document, "file")
 
         return document["content"]
-
-
-mcp.add_transform(ResourcesAsTools(mcp))
 
 if __name__ == "__main__":
     mcp.run(transport="http", port=8000)
