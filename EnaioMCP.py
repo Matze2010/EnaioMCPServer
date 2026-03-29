@@ -26,9 +26,9 @@ async def get_case_metadata(reference: Annotated[str, "case reference number"], 
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
 
-        objectId, record = await backend.getAktenzeichen(reference)
+        akte, record = await backend.getAktenzeichen(reference)
         documents = await backend.getDocumentList(akte[0])
-        reecord["documents"] = documents
+        record["documents"] = documents
 
         return record
 
