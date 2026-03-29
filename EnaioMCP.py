@@ -27,49 +27,51 @@ async def get_case_metadata(reference: Annotated[str, "case reference number"], 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
 
         objectId, record = await backend.getAktenzeichen(reference)
+        documents = await backend.getDocumentList(akte[0])
+        reecord["documents"] = documents
 
         return record
 
 
-@mcp.tool
-async def list_case_documents(reference: Annotated[str, "case reference number"], ctx: Context) -> List:
-        """
-        Erstelle eine Liste aller Dokumente, die zu einem laufenden Vorgang gehören.
-        :param reference: Vorgangsnummer
-        """
+# @mcp.tool
+# async def list_case_documents(reference: Annotated[str, "case reference number"], ctx: Context) -> List:
+#         """
+#         Erstelle eine Liste aller Dokumente, die zu einem laufenden Vorgang gehören.
+#         :param reference: Vorgangsnummer
+#         """
 
-        await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference}")
+#         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference}")
 
-        json = None
-        akte = await backend.getAktenzeichen(reference)
-        result = await backend.getDocumentList(akte[0])
+#         json = None
+#         akte, record = await backend.getAktenzeichen(reference)
+#         result = await backend.getDocumentList(akte[0])
 
-        return {"reference_nr": reference, "documents": result }
+#         return {"reference_nr": reference, "documents": result }
 
 
-@mcp.resource("document://{document_nr}/fulltext")
-async def access_document_fulltext(document_nr: str, ctx: Context) -> str:
+@mcp.resource("document://{document}/fulltext")
+async def access_document_fulltext(document: str, ctx: Context) -> str:
         """
         Access documents fulltext. The document's content is provided as text representation.
-        :param document_nr: Dokumenten-Nr
+        :param document: Dokumenten-Nr
         """
 
-        await ctx.info(f"Lade Textinhalt zum Dokument {document_nr}")
+        await ctx.info(f"Lade Textinhalt zum Dokument {document}")
 
-        document, json = await backend.getDocument(document_nr, "text")
+        document, json = await backend.getDocument(document, "text")
 
         return document["content"]
 
-@mcp.resource("document://{document_nr}/file")
-async def download_document(document_nr: str, ctx: Context) -> str:
+@mcp.resource("document://{document}/file")
+async def download_document(document: str, ctx: Context) -> str:
         """
         Access document and download as file. The document's content is provided as binary representation.
         :param document_nr: Dokumenten-Nr
         """
 
-        await ctx.info(f"Lade Datei zum Dokument {document_nr}")
+        await ctx.info(f"Lade Datei zum Dokument {document}")
 
-        document, json = await backend.getDocument(document_nr, "file")
+        document, json = await backend.getDocument(document, "file")
 
         return document["content"]
 

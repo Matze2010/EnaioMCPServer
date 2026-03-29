@@ -177,13 +177,12 @@ class EnaioBackend:
                 documents.append(
                     {
                         "type": config["type"],
-                        "document_nr": document_nr,
+                        "id": document_nr,
                         "name": childDict.property("documentTitle"),
                         "creationDate": childDict.property("system:creationDate"),
                         "lastModificationDate": childDict.property(
                             "system:lastModificationDate"
-                        ),
-                        "resource": f"document://{document_nr}/text"
+                        )
                     }
                 )
 
