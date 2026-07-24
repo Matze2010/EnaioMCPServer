@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 import vorlage
 from EnaioBackend import EnaioBackend
+from rate_limiter import RateLimiter, RateLimitExceeded
 
 url = os.environ.get('URL', 'DEFAULT_URL')
 username = os.environ.get('USERNAME', 'DEFAULT_USERNAME')
@@ -26,6 +27,13 @@ backend.setAuth(username, password)
 # erzeugten Dokumente. Beide sind ueber Umgebungsvariablen konfigurierbar.
 ASSETS_DIR = Path(os.environ.get("ASSETS_DIR", Path(__file__).resolve().parent / "assets"))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).resolve().parent / "output"))
+
+# Maximale Anzahl an Enaio-Uploads pro Minute. Wird das Limit ueberschritten,
+# lehnt create_case_document den Upload sofort mit HTTP 429 ab. Ueber die
+# Umgebungsvariable UPLOAD_RATE_LIMIT_PER_MINUTE konfigurierbar (Default 30);
+# ein Wert <= 0 deaktiviert die Begrenzung.
+UPLOAD_RATE_LIMIT_PER_MINUTE = int(os.environ.get("UPLOAD_RATE_LIMIT_PER_MINUTE", "30"))
+upload_limiter = RateLimiter(UPLOAD_RATE_LIMIT_PER_MINUTE)
 
 # Zuordnungsliste: Dokumententyp -> zugehoerige Vorlage und der in der Vorlage
 # vorhandene Text der Betreffzeile (subject_placeholder), der bei Angabe eines
@@ -165,8 +173,11 @@ async def create_case_document(
         angegeben - dem betreff gefuellt. Briefkopf, Logo und Fusszeile der Vorlage
         bleiben erhalten.
 
-        Hinweis: In diesem Schritt wird das erzeugte Dokument ausschliesslich lokal
-        gespeichert. Das Hochladen in den Enaio-Vorgang ist noch nicht implementiert.
+        Das erzeugte Dokument wird lokal gespeichert und anschliessend ueber die
+        Enaio-API in den zugehoerigen Vorgang (reference) hochgeladen. Ein
+        RateLimiter begrenzt die Uploads auf UPLOAD_RATE_LIMIT_PER_MINUTE pro
+        Minute; wird das Limit ueberschritten, wird der Upload mit HTTP 429
+        abgelehnt (das lokal erzeugte Dokument bleibt erhalten).
 
         :param reference: Aktenzeichen / Vorgangsnummer.
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
@@ -226,9 +237,26 @@ async def create_case_document(
 
         await ctx.info(f"Dokument lokal gespeichert unter {written}")
 
-        # TODO: Enaio-Upload noch nicht implementiert. Hier wird spaeter das erzeugte
-        # Dokument ueber die Enaio-API in den Vorgang (reference) hochgeladen, z. B.
-        # via backend.uploadDocument(reference, written, document_type, betreff).
+        # Rate-Limit pruefen, bevor tatsaechlich hochgeladen wird: ein belegter
+        # Slot entspricht damit einem echten Upload-Versuch. Bei Ueberschreitung
+        # sofortige Ablehnung mit HTTP 429 (kein Warten).
+        try:
+                await upload_limiter.acquire()
+        except RateLimitExceeded as e:
+                raise HTTPException(
+                        status_code=429,
+                        detail=str(e),
+                        headers={"Retry-After": str(e.retry_after)},
+                )
+
+        await ctx.info(f"Lade Dokument in Vorgang {reference} nach Enaio hoch")
+        upload = await backend.uploadDocument(
+                reference,
+                written,
+                document_type,
+                betreff,
+                out_name,
+        )
 
         return {
                 "reference_nr": reference,
@@ -237,7 +265,8 @@ async def create_case_document(
                 "template": mapping["template"],
                 "blocks": len(content),
                 "local_path": str(written),
-                "stored_in_enaio": False,
+                "stored_in_enaio": True,
+                "enaio_object_id": upload.get("objectId"),
         }
 
 

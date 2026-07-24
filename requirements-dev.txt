@@ -1,0 +1,5 @@
+# Zusaetzliche Abhaengigkeiten fuer die Tests (nicht im Laufzeit-Image noetig).
+# Installation: pip install -r requirements-dev.txt
+-r docker/requirements.txt
+pytest
+pytest-asyncio

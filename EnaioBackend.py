@@ -1,4 +1,6 @@
 import os
+import json
+import uuid
 import requests
 import httpx
 import logging
@@ -7,12 +9,23 @@ import re
 import unicodedata
 import tempfile
 
+from pathlib import Path
 from datetime import datetime
 from pydantic import BaseModel, Field
 from fastapi import HTTPException
 
 AKTENZEICHEN_REGEX = "DS\\.[1-9]\\.[1-9]-(202[2-6])-(\\d|[1-9]\\d{1,5})"
 DOCUMENT_REGEX = "(202[2-6])-(\\d|[1-9]\\d{1,6})|(\\d{1,12})"
+
+# Objekttyp-ID der Vorgangsdokumente (OSTPL_AA_DOKUMENT), unter der neu erzeugte
+# Dokumente in einen Vorgang eingehaengt werden. Entspricht dem Eintrag "262146"
+# in EnaioBackend.settings.
+UPLOAD_OBJECT_TYPE_ID = "262146"
+
+# MIME-Type fuer die erzeugten Word-Dokumente (.docx).
+DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 
 def standardize_text(text: str) -> str:
     # Convert text to lowercase
@@ -277,3 +290,160 @@ class EnaioBackend:
             return standardize_text(response.text)
 
         return None
+
+    def _build_upload_payload(self, parent_id, file_bytes, betreff, filename):
+        """Baut den Multipart-Body fuer POST /api/dms/objects.
+
+        Erzeugt genau zwei Parts gemaess der Enaio-DMS-REST-Spezifikation:
+
+        * ``name="data"`` (application/json) mit den Objekt-Metadaten und einem
+          ``contentStreams``-Eintrag, der ueber ``cid`` auf den Inhalts-Part
+          verweist.
+        * ``name="<cid>"`` mit dem Binaerinhalt (zusaetzlich ``Content-ID``-Header).
+
+        Der Multipart wird bewusst manuell zusammengesetzt: Der ``data``-Part
+        muss ``application/json`` sein (nicht text/plain) und der Inhalts-Part
+        benoetigt einen ``Content-ID``-Header, was ueber httpx' ``files=`` nicht
+        zuverlaessig steuerbar ist. Diese Kapselung ist die zentrale Stelle, an
+        der die Request-Form bei Bedarf angepasst werden kann.
+
+        :returns: Tupel ``(body_bytes, content_type_header)``.
+        """
+
+        cid = "cid_document"
+
+        data = {
+            "objects": [
+                {
+                    "properties": {
+                        "system:objectTypeId": {"value": UPLOAD_OBJECT_TYPE_ID},
+                        "system:parentId": {"value": str(parent_id)},
+                        "Betreff": {"value": betreff or filename},
+                    },
+                    "contentStreams": [
+                        {
+                            "mimeType": DOCX_MIME_TYPE,
+                            "fileName": filename,
+                            "cid": cid,
+                        }
+                    ],
+                }
+            ]
+        }
+
+        boundary = uuid.uuid4().hex
+        crlf = b"\r\n"
+        dash = b"--"
+        boundary_bytes = boundary.encode("ascii")
+
+        parts = []
+
+        # Part 1: Metadaten als JSON.
+        parts.append(dash + boundary_bytes + crlf)
+        parts.append(b'Content-Disposition: form-data; name="data"' + crlf)
+        parts.append(b"Content-Type: application/json;charset=UTF-8" + crlf)
+        parts.append(crlf)
+        parts.append(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        parts.append(crlf)
+
+        # Part 2: Dateiinhalt, referenziert ueber die cid.
+        cid_bytes = cid.encode("ascii")
+        filename_header = filename.replace('"', "")
+        parts.append(dash + boundary_bytes + crlf)
+        parts.append(
+            b'Content-Disposition: form-data; name="'
+            + cid_bytes
+            + b'"; filename="'
+            + filename_header.encode("utf-8")
+            + b'"'
+            + crlf
+        )
+        parts.append(b"Content-ID: " + cid_bytes + crlf)
+        parts.append(b"Content-Type: " + DOCX_MIME_TYPE.encode("ascii") + crlf)
+        parts.append(crlf)
+        parts.append(file_bytes)
+        parts.append(crlf)
+
+        # Abschlussgrenze.
+        parts.append(dash + boundary_bytes + dash + crlf)
+
+        body = b"".join(parts)
+        content_type = f"multipart/form-data; boundary={boundary}"
+        return body, content_type
+
+    @staticmethod
+    def _extract_object_id(data):
+        """Liest die system:objectId des ersten Objekts aus der Upload-Antwort."""
+        try:
+            props = data["objects"][0]["properties"]
+            return props["system:objectId"]["value"]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    async def uploadDocument(self, reference, file_path, document_type, betreff, filename):
+        """Laedt eine Datei als neues Dokument in den Vorgang hoch.
+
+        Das Dokument wird als OSTPL_AA_DOKUMENT-Objekt unter dem ueber
+        ``reference`` (Aktenzeichen) ermittelten Vorgang angelegt.
+
+        :param reference: Aktenzeichen des Ziel-Vorgangs.
+        :param file_path: Pfad zur hochzuladenden Datei (.docx).
+        :param document_type: Dokumententyp (aktuell nur informativ/Logging).
+        :param betreff: Betreff/Titel des Dokuments (Fallback: Dateiname).
+        :param filename: Anzuzeigender Dateiname in Enaio.
+        :returns: ``{"objectId": <id>, "reference_nr": <reference>}``.
+        """
+
+        # Elternobjekt (Vorgang) ermitteln; wirft 404, wenn nicht vorhanden.
+        parent_id, _ = await self.getAktenzeichen(reference)
+
+        file_bytes = Path(file_path).read_bytes()
+        body, content_type = self._build_upload_payload(
+            parent_id, file_bytes, betreff, filename
+        )
+
+        try:
+            self.logger.info(
+                f"Lade Dokument ({document_type}) in Vorgang {reference} "
+                f"(Parent {parent_id}) hoch"
+            )
+            response = await self.session.post(
+                self.backendUrl + "/api/dms/objects?minimalResponse=true",
+                content=body,
+                headers={
+                    "accept": "application/json",
+                    "Content-Type": content_type,
+                },
+            )
+        except httpx.RequestError as e:
+            raise HTTPException(
+                status_code=503, detail=f"Error connecting to ENAIO API: {e}"
+            )
+
+        # Laut Spezifikation signalisiert 422 fehlgeschlagene Inserts.
+        if response.status_code == 422:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Enaio hat den Upload abgelehnt (422): {response.text}",
+            )
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Unerwartete Antwort der ENAIO API: {e}",
+            )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        object_id = self._extract_object_id(data)
+
+        self.logger.info(
+            f"Dokument in Vorgang {reference} hochgeladen (ObjectId {object_id})"
+        )
+
+        return {"objectId": object_id, "reference_nr": reference}
