@@ -21,10 +21,36 @@ Format der Blockliste (blocks): eine Liste von Blöcken. Unterstützte Typen:
   {"type":"table","header":["Sp1","Sp2","Sp3"],"rows":[["a","b","c"], ...]}
 Run-Attribute: t (Text, Pflicht), b (fett), i (kursiv), size (halbe Punkt, z.B. 24),
 color (Hex ohne #).
+
+Zusätzlich werden Platzhalter in eckigen Klammern (z.B. [Datum], [Aktenzeichen]) in der
+Vorlage durch übergebene Werte ersetzt (Parameter fields). Die Ersetzung greift über den
+Dokumentkörper (word/document.xml) sowie Kopf-/Fußzeilen und Fuß-/Endnoten. Der Platzhalter
+[Datum] wird stets automatisch mit dem aktuellen Datum (deutsche Langform) befüllt und
+überschreibt einen etwaig übergebenen Wert. Nicht übergebene Platzhalter bleiben unverändert
+im Dokument stehen.
 """
 import re
 import zipfile
+from datetime import datetime
 from pathlib import Path
+
+_MONATE_DE = [
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+]
+
+
+def _aktuelles_datum_de():
+    """Aktuelles Datum in deutscher Langform, z.B. '24. Juli 2026'."""
+    now = datetime.now()
+    return f"{now.day}. {_MONATE_DE[now.month - 1]} {now.year}"
+
+
+def apply_placeholders(xml, replacements):
+    """Ersetzt Platzhalter [key] durch den zugehörigen Wert (XML-escaped)."""
+    for key, value in replacements.items():
+        xml = xml.replace(f"[{key}]", esc(str(value)))
+    return xml
 
 
 def esc(t):
@@ -130,7 +156,8 @@ def clean_settings(zin_names, read):
     return patches
 
 
-def fill_document(template_path, blocks, out_path, betreff=None, subject_placeholder=None):
+def fill_document(template_path, blocks, out_path, betreff=None, subject_placeholder=None,
+                  fields=None):
     """
     Füllt die Word-Vorlage template_path mit den Inhalten aus blocks und schreibt das
     Ergebnis nach out_path. Optional wird die Betreffzeile der Vorlage ersetzt.
@@ -142,6 +169,11 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
                           subject_placeholder gesetzt ist.
     :param subject_placeholder: Der in der Vorlage vorhandene Text der Betreffzeile,
                           der durch betreff ersetzt werden soll (z.B. "Vermerk").
+    :param fields:        Optionale Zuordnung Platzhaltername -> Ersatztext. Schlüssel ohne
+                          eckige Klammern (z.B. "Aktenzeichen" für den Platzhalter
+                          [Aktenzeichen]). [Datum] wird stets automatisch mit dem aktuellen
+                          Datum (deutsche Langform) befüllt und überschreibt eine Übergabe.
+                          Nicht angegebene Platzhalter bleiben unverändert.
     :returns: Path des geschriebenen Dokuments.
     :raises FileNotFoundError: wenn die Vorlage nicht existiert.
     :raises ValueError: bei unerwartetem Vorlagenaufbau oder unbekanntem Blocktyp.
@@ -151,6 +183,9 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
         raise FileNotFoundError(f"Vorlage nicht gefunden: {tpl}")
 
     body = build_body(blocks)
+
+    replacements = dict(fields or {})
+    replacements["Datum"] = _aktuelles_datum_de()  # immer aktuell, überschreibt Übergabe
 
     with zipfile.ZipFile(tpl, "r") as zin:
         names = zin.namelist()
@@ -171,7 +206,16 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
             doc = neu
 
         doc = doc.replace("<w:sectPr", body + "<w:sectPr", 1)
+        doc = apply_placeholders(doc, replacements)
         patches["word/document.xml"] = doc.encode("utf-8")
+
+        # Platzhalter auch in Kopf-/Fußzeilen und Fuß-/Endnoten ersetzen. document.xml wird
+        # ausschließlich über die doc-Variable behandelt (Body-Einfügung bleibt erhalten).
+        for n in names:
+            if re.fullmatch(r"word/(header|footer|footnotes|endnotes)\d*\.xml", n):
+                src = patches.get(n)
+                text = src.decode("utf-8") if src is not None else read(n).decode("utf-8")
+                patches[n] = apply_placeholders(text, replacements).encode("utf-8")
 
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)

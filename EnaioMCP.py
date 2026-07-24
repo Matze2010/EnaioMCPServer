@@ -142,6 +142,19 @@ async def create_case_document(
                 Optional[str],
                 "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage.",
         ] = None,
+        fields: Annotated[
+                Optional[dict],
+                (
+                        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
+                        "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
+                        "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
+                        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\",\"Bearbeiter\":\"Max Mustermann\"}. "
+                        "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
+                        "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
+                        "angegeben - aus 'reference' uebernommen. Nicht angegebene Platzhalter bleiben "
+                        "unveraendert im Dokument."
+                ),
+        ] = None,
 ) -> dict:
         """
         Erzeugt ein Word-Dokument (.docx) fuer einen Vorgang, indem eine zum
@@ -159,6 +172,8 @@ async def create_case_document(
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
         :param content: Liste von Inhaltsbloecken.
         :param betreff: Optionaler Betreff.
+        :param fields: Optionale Zuordnung Platzhaltername -> Ersatztext; [Datum] immer
+                aktuelles Datum, [Aktenzeichen] faellt auf reference zurueck.
         """
 
         type_key = (document_type or "").strip().lower()
@@ -192,6 +207,11 @@ async def create_case_document(
         out_name = f"{_sanitize_filename(reference)}_{_sanitize_filename(document_type)}_{timestamp}.docx"
         out_path = OUTPUT_DIR / out_name
 
+        # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck, wenn nicht
+        # ausdruecklich angegeben. [Datum] setzt fill_document stets auf das aktuelle Datum.
+        doc_fields = dict(fields or {})
+        doc_fields.setdefault("Aktenzeichen", reference)
+
         try:
                 written = vorlage.fill_document(
                         template_path,
@@ -199,6 +219,7 @@ async def create_case_document(
                         out_path,
                         betreff=betreff,
                         subject_placeholder=mapping.get("subject_placeholder"),
+                        fields=doc_fields,
                 )
         except (ValueError, FileNotFoundError) as e:
                 raise HTTPException(status_code=422, detail=f"Fehler beim Fuellen der Vorlage: {e}")
