@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Lokal erzeugte Dokumente (create_case_document)
+/output/
