@@ -117,10 +117,25 @@ async def create_case_document(
         ],
         content: Annotated[
                 List[dict],
-                "Blockliste mit den Dokumenteninhalten. Unterstuetzte Blocktypen: "
-                "heading, subheading, para, listitem, table. Beispiel: "
-                '[{"type":"heading","text":"1. Sachverhalt"},'
-                '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"Text."}]}].',
+                (
+                        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
+                        "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
+                        '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
+                        '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
+                        '- para:       {"type":"para","runs":[{"t":"Fett: ","b":true},{"t":"normaler Text."}],"jc":"both"}\n'
+                        '              Kurzform ohne Formatierung: {"type":"para","text":"einfacher Absatz"}\n'
+                        '- listitem:   {"type":"listitem","number":1,"text":"nummerierter Punkt"}  '
+                        '(ohne "number" bzw. number=null -> Aufzaehlung)\n'
+                        '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
+                        "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
+                        "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
+                        "Beispiel: "
+                        '[{"type":"heading","text":"1. Sachverhalt"},'
+                        '{"type":"subheading","text":"Auflagen"},'
+                        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
+                        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
+                        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
+                ),
         ],
         ctx: Context,
         betreff: Annotated[
