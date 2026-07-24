@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Get the latest version of EnaioMCP from github
 RUN git clone https://github.com/Matze2010/EnaioMCPServer.git server
 
+# Copy assets to container
+COPY assets/ server/assets
+
 # Expose the port that the MCP server will run on
 EXPOSE 8000
 
