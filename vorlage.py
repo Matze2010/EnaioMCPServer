@@ -58,13 +58,14 @@ def esc(t):
 
 
 def replace_subject(doc, placeholder, betreff):
-    """Ersetzt die Betreffzeile placeholder durch betreff in word/document.xml.
+    """Ersetzt den Betreff-Platzhalter placeholder (z.B. [Betreff]) durch betreff.
 
     Word teilt Text haeufig ueber mehrere Runs/<w:t>-Elemente auf (z.B. durch
-    Rechtschreibpruefung oder rsid-Aenderungsverfolgung), sodass "Brief" als
-    "B" + "rief" in getrennten Runs vorliegt. Deshalb wird der Platzhalter nicht
-    nur innerhalb eines einzelnen <w:t> gesucht, sondern run-uebergreifend:
-    zwischen den einzelnen Zeichen sind optionale Run-/Text-Grenzen erlaubt.
+    Rechtschreibpruefung oder rsid-Aenderungsverfolgung), sodass "[Betreff]" als
+    "[" + "Betreff" + "]" in getrennten Runs vorliegen kann. Deshalb wird der
+    Platzhalter nicht nur innerhalb eines einzelnen <w:t> gesucht, sondern
+    run-uebergreifend: zwischen den einzelnen Zeichen sind optionale Run-/Text-
+    Grenzen erlaubt.
 
     :returns: Tupel (neuer_xml, anzahl_ersetzungen). anzahl_ersetzungen=0, wenn
               der Platzhalter nicht gefunden wurde.
@@ -193,19 +194,20 @@ def clean_settings(zin_names, read):
     return patches
 
 
-def fill_document(template_path, blocks, out_path, betreff=None, subject_placeholder=None,
-                  fields=None):
+def fill_document(template_path, blocks, out_path, betreff=None,
+                  subject_placeholder="[Betreff]", fields=None):
     """
     Füllt die Word-Vorlage template_path mit den Inhalten aus blocks und schreibt das
-    Ergebnis nach out_path. Optional wird die Betreffzeile der Vorlage ersetzt.
+    Ergebnis nach out_path. Der Betreff-Platzhalter der Vorlage wird ersetzt.
 
     :param template_path: Pfad zur .docx-Vorlage (Str oder Path).
     :param blocks:        Liste von Inhaltsblöcken (siehe Modul-Docstring).
     :param out_path:      Zielpfad der erzeugten .docx-Datei (Str oder Path).
-    :param betreff:       Optionaler Betreff. Wird nur ersetzt, wenn zusätzlich
-                          subject_placeholder gesetzt ist.
-    :param subject_placeholder: Der in der Vorlage vorhandene Text der Betreffzeile,
-                          der durch betreff ersetzt werden soll (z.B. "Vermerk").
+    :param betreff:       Optionaler Betreff. Ersetzt den subject_placeholder. Ohne Betreff
+                          wird der Platzhalter aus der Vorlage entfernt (leere Betreffzeile).
+    :param subject_placeholder: Der in der Vorlage vorhandene Betreff-Platzhalter, der durch
+                          betreff ersetzt wird. Standard: [Betreff]. Die Ersetzung greift auch,
+                          wenn Word den Platzhalter ueber mehrere Runs aufgeteilt hat.
     :param fields:        Optionale Zuordnung Platzhaltername -> Ersatztext. Schlüssel ohne
                           eckige Klammern (z.B. "Aktenzeichen" für den Platzhalter
                           [Aktenzeichen]). [Datum] wird stets automatisch mit dem aktuellen
@@ -231,11 +233,16 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
         if "<w:sectPr" not in doc:
             raise ValueError("Kein <w:sectPr> in document.xml gefunden - Vorlage unerwartet aufgebaut.")
 
-        if betreff and subject_placeholder:
-            doc, n = replace_subject(doc, subject_placeholder, betreff)
-            if n == 0:
+        if subject_placeholder:
+            # Betreff-Platzhalter (z.B. [Betreff]) ersetzen. Ohne Betreff wird der
+            # Platzhalter entfernt, damit er nicht woertlich im Dokument stehen bleibt.
+            doc, n = replace_subject(doc, subject_placeholder, betreff or "")
+            # Nur ein tatsaechlich angeforderter, aber fehlender Betreff-Platzhalter ist
+            # ein Vorlagenfehler. Fehlt der Platzhalter ohne Betreff, ist das unkritisch.
+            if n == 0 and betreff:
                 raise ValueError(
-                    f'Betreffzeile "{subject_placeholder}" nicht gefunden - Vorlage unerwartet aufgebaut.')
+                    f'Betreff-Platzhalter "{subject_placeholder}" nicht gefunden - '
+                    f'Vorlage unerwartet aufgebaut.')
 
         # Den [Body]-Platzhalter durch den erzeugten Body ersetzen. Der Platzhalter steht
         # in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>). Da der Body aus

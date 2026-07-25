@@ -41,12 +41,12 @@ OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).resolve().parent /
 UPLOAD_RATE_LIMIT_PER_MINUTE = int(os.environ.get("UPLOAD_RATE_LIMIT_PER_MINUTE", "30"))
 upload_limiter = RateLimiter(UPLOAD_RATE_LIMIT_PER_MINUTE)
 
-# Zuordnungsliste: Dokumententyp -> zugehoerige Vorlage und der in der Vorlage
-# vorhandene Text der Betreffzeile (subject_placeholder), der bei Angabe eines
-# Betreffs ersetzt wird. Der Lookup erfolgt case-insensitive ueber den Schluessel.
+# Zuordnungsliste: Dokumententyp -> zugehoerige Vorlage. Die Betreffzeile wird in den
+# Vorlagen einheitlich ueber den Platzhalter [Betreff] gesetzt (siehe vorlage.py). Der
+# Lookup erfolgt case-insensitive ueber den Schluessel.
 DOCUMENT_TEMPLATES = {
-        "vermerk": {"template": "Vorlage_Vermerk.docx", "subject_placeholder": "Vermerk"},
-        "brief": {"template": "Vorlage_Brief.docx", "subject_placeholder": "Brief"},
+        "vermerk": {"template": "Vorlage_Vermerk.docx"},
+        "brief": {"template": "Vorlage_Brief.docx"},
 }
 
 
@@ -236,7 +236,6 @@ async def create_case_document(
                         content,
                         out_path,
                         betreff=betreff,
-                        subject_placeholder=mapping.get("subject_placeholder"),
                         fields=doc_fields,
                 )
         except (ValueError, FileNotFoundError) as e:

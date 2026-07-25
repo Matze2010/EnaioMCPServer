@@ -8,8 +8,8 @@ Vorlagendatei ist in `EnaioMCP.py` in `DOCUMENT_TEMPLATES` definiert.
 
 | Dokumententyp | Vorlagendatei          | Betreffzeile (Platzhalter) |
 |---------------|------------------------|----------------------------|
-| Vermerk       | `Vorlage_Vermerk.docx` | `Vermerk`                  |
-| Brief         | `Vorlage_Brief.docx`   | `Brief`                    |
+| Vermerk       | `Vorlage_Vermerk.docx` | `[Betreff]`                |
+| Brief         | `Vorlage_Brief.docx`   | `[Betreff]`                |
 
 Die eigentlichen `.docx`-Dateien werden bewusst **nicht** im Repository
 versioniert und müssen hier abgelegt werden. Fehlt eine Vorlage, liefert der
@@ -23,12 +23,14 @@ Das Vorlagenverzeichnis lässt sich über die Umgebungsvariable `ASSETS_DIR`
 Die Vorlage wird **nicht** nachgebaut, sondern direkt befüllt, damit Briefkopf,
 Logo, Kopf- und Fußzeile erhalten bleiben:
 
-- Der erzeugte Inhalt wird direkt vor `<w:sectPr>` in `word/document.xml`
-  eingefügt. Die Vorlage muss daher ein `<w:sectPr>`-Element enthalten (bei einer
-  normalen, in Word gespeicherten `.docx` immer der Fall).
-- Ist ein Betreff angegeben, wird der in der Tabelle genannte Platzhalter-Text der
-  Betreffzeile (z. B. `Vermerk`) durch den übergebenen Betreff ersetzt. Der
-  Platzhalter muss als eigener Textlauf in der Vorlage vorkommen.
+- Der erzeugte Inhalt ersetzt den Platzhalter-Absatz `[Body]` in
+  `word/document.xml`; dessen Absatz-Formatvorlage (z. B. `Inhalt`) wird auf den
+  eingefügten Inhalt übertragen. Die Vorlage muss ein `<w:sectPr>`-Element
+  enthalten (bei einer normalen, in Word gespeicherten `.docx` immer der Fall).
+- Die Betreffzeile wird über den Platzhalter `[Betreff]` gesetzt: Ist ein Betreff
+  angegeben, wird `[Betreff]` durch den übergebenen Text ersetzt; ohne Betreff wird
+  der Platzhalter entfernt. Die Ersetzung funktioniert auch, wenn Word den
+  Platzhalter intern über mehrere Textläufe aufgeteilt hat.
 
 Die unterstützten Inhaltsblöcke (heading, subheading, para, listitem, table) sind
 in `vorlage.py` dokumentiert.
