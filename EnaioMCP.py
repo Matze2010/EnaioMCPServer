@@ -271,13 +271,21 @@ async def list_running_cases(
 
         Zurückgegeben wird eine kompakte Liste ohne Akteninhalt. Zu jedem Treffer
         liefert 'reference_nr' das Aktenzeichen, mit dem sich über
-        get_case_metadata Details und die Dokumentliste nachladen lassen.
+        get_case_metadata Details und die Dokumentliste nachladen lassen, sowie
+        'dms_link' einen direkten Link, mit dem der Vorgang im Enaio-Web-Client
+        geöffnet werden kann; dieser Link sollte in der Antwort mit angegeben
+        werden.
 
         :param user: Benutzerkürzel des Aktenverantwortlichen.
         """
 
         await ctx.info(f"Suche laufende Vorgänge von {user} in ENAIO")
         cases = await backend.get_running_cases(user)
+
+        for case in cases:
+                link = _dms_link(case.get("object_id"))
+                if link:
+                        case["dms_link"] = link
 
         return {
                 "user": user,
