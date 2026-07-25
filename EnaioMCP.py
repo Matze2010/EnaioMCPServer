@@ -14,6 +14,12 @@ from fastapi import HTTPException
 import vorlage
 from EnaioBackend import EnaioBackend
 from rate_limiter import RateLimiter, RateLimitExceeded
+from logging_config import configure_logging
+
+# Logging prozessweit konfigurieren (Level ueber LOG_LEVEL, Default INFO).
+# Auf Modulebene, damit sowohl "fastmcp run ..." als auch "python EnaioMCP.py"
+# die Konfiguration erhalten.
+configure_logging()
 
 url = os.environ.get('URL', 'DEFAULT_URL')
 username = os.environ.get('USERNAME', 'DEFAULT_USERNAME')
