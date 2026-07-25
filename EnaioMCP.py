@@ -14,6 +14,7 @@ import vorlage
 from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
+from request_logging import RequestHeaderLoggingMiddleware
 
 # Logging prozessweit konfigurieren (Level ueber LOG_LEVEL, Default INFO).
 # Auf Modulebene, damit sowohl "fastmcp run ..." als auch "python EnaioMCP.py"
@@ -192,6 +193,9 @@ mcp = FastMCP(
                 "list_running_cases das passende Tool."
         ),
 )
+
+# Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
+mcp.add_middleware(RequestHeaderLoggingMiddleware())
 
 
 @mcp.tool(
