@@ -27,6 +27,11 @@ password = os.environ.get('PASSWORD', 'DEFAULT_PASSWORD')
 backend = EnaioBackend(url=url)
 backend.set_auth(username, password)
 
+# Basis-URL des Enaio-Web-Clients (osweb) fuer anklickbare Links auf Vorgaenge.
+# Ohne eigene Konfiguration wird die API-Basis-URL verwendet, da Web-Client und
+# REST-API in der Regel auf demselben Host liegen.
+DMS_WEB_URL = os.environ.get('DMS_WEB_URL', url)
+
 
 # Verzeichnis mit den .docx-Hausvorlagen sowie Ausgabeverzeichnis fuer die
 # erzeugten Dokumente. Beide sind ueber Umgebungsvariablen konfigurierbar.
@@ -52,6 +57,27 @@ DOCUMENT_TEMPLATES = {
 def _sanitize_filename(text: str) -> str:
         """Ersetzt fuer Dateinamen problematische Zeichen durch Unterstriche."""
         return re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip()).strip("._") or "dokument"
+
+
+def _dms_link(object_id) -> Optional[str]:
+        """Baut den Link auf einen Vorgang im Enaio-Web-Client (osweb).
+
+        Der ``state``-Parameter ist ein Zeitstempel in Millisekunden und wird beim
+        Aufbau des Links jeweils neu erzeugt.
+
+        :param object_id: ObjectID des Vorgangs (``system:objectId``).
+        :returns: Link oder ``None``, wenn ObjectID oder Basis-URL fehlen.
+        """
+
+        base = (DMS_WEB_URL or "").rstrip("/")
+        if not object_id or not base or base == "DEFAULT_URL":
+                return None
+
+        state = int(datetime.now().timestamp() * 1000)
+        return (
+                f"{base}/osweb/#/folder/{object_id}/0"
+                f"?state={state}&currentId={object_id}&currentTypeId=0"
+        )
 
 
 def _resolve_template(document_type: str):
@@ -196,6 +222,9 @@ async def get_case_metadata(
         Rückgabe enthält u.a. Titel, Kategorie, Sachbearbeiter sowie ein
         "documents"-Feld mit allen zugehörigen Dokumenten (inkl. Dokument-ID), die
         mit access_document_fulltext oder download_document abgerufen werden können.
+        Zusätzlich liefert "dms_link" einen direkten Link, mit dem der Vorgang im
+        Enaio-Web-Client geöffnet werden kann; dieser Link sollte in der Antwort
+        mit angegeben werden.
 
         :param reference: Aktenzeichen des Vorgangs (Pflichtformat siehe oben).
         """
@@ -205,6 +234,11 @@ async def get_case_metadata(
 
         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference} ({akte})")
         record["documents"] = await backend.get_document_list(akte)
+
+        record["object_id"] = akte
+        link = _dms_link(akte)
+        if link:
+                record["dms_link"] = link
 
         return record
 

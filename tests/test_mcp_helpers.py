@@ -1,5 +1,8 @@
 """Tests fuer die aus den MCP-Tools ausgelagerten Hilfsfunktionen."""
 
+import re
+from datetime import datetime
+
 import pytest
 from fastapi import HTTPException
 
@@ -82,6 +85,45 @@ def test_render_document_maps_template_errors_to_422(monkeypatch, tmp_path):
 
     assert excinfo.value.status_code == 422
     assert "Kein <w:sectPr> gefunden" in excinfo.value.detail
+
+
+def test_dms_link_uses_example_format(monkeypatch):
+    monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", "https://enaio.test")
+
+    link = EnaioMCP._dms_link("132887")
+
+    match = re.fullmatch(
+        r"https://enaio\.test/osweb/#/folder/132887/0"
+        r"\?state=(\d+)&currentId=132887&currentTypeId=0",
+        link,
+    )
+    assert match is not None
+    # state ist ein Zeitstempel in Millisekunden und liegt nahe an "jetzt".
+    state = int(match.group(1))
+    assert abs(state - datetime.now().timestamp() * 1000) < 60_000
+
+
+def test_dms_link_strips_trailing_slash(monkeypatch):
+    monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", "https://enaio.test/")
+
+    assert EnaioMCP._dms_link("42").startswith("https://enaio.test/osweb/#/folder/42/0?")
+
+
+@pytest.mark.parametrize(
+    "base, object_id",
+    [
+        ("https://enaio.test", None),
+        ("https://enaio.test", ""),
+        ("", "132887"),
+        (None, "132887"),
+        # Platzhalter aus dem Default, wenn keine URL konfiguriert ist.
+        ("DEFAULT_URL", "132887"),
+    ],
+)
+def test_dms_link_returns_none_without_usable_input(monkeypatch, base, object_id):
+    monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", base)
+
+    assert EnaioMCP._dms_link(object_id) is None
 
 
 async def test_enforce_upload_rate_limit_maps_to_429(monkeypatch):
