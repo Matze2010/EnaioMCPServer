@@ -24,6 +24,9 @@ EXCLUDE_DELETED = "DELETED_DOCUMENTS_EXCLUDE"
 # Standard-Optionen einer Suchanfrage.
 DEFAULT_SEARCH_OPTIONS = {"Rights": 0, "RegisterContext": 0}
 
+# Aktenstatus, der einen noch nicht abgeschlossenen Vorgang kennzeichnet.
+RUNNING_CASE_STATUS = "laufend"
+
 SEARCH_PATH = "/api/dms/objects/search"
 
 
@@ -224,6 +227,17 @@ class EnaioBackend:
         return objects[0]
 
     @staticmethod
+    def _case_record(akte):
+        """Baut die gemeinsamen Vorgangsfelder aus einem OSTPL_AA-Objekt."""
+
+        return {
+            "reference_nr": akte.property("Aktenzeichen"),
+            "title": akte.property("Aktenbezeichnung"),
+            "category": akte.property("Kategorisierung"),
+            "topics": akte.property("Aktenplaneintrag").split("|"),
+        }
+
+    @staticmethod
     def _document_record(child, type_name, *, id_key, id_field, title_field):
         """Baut den einheitlichen Dokument-Datensatz aus einem Enaio-Objekt."""
 
@@ -264,16 +278,44 @@ class EnaioBackend:
         )
 
         akte = self._require_one(objects, "Aktenzeichen", aktenzeichen)
-        record = {
-            "reference_nr": akte.property("Aktenzeichen"),
-            "title": akte.property("Aktenbezeichnung"),
-            "category": akte.property("Kategorisierung"),
-            "topics": akte.property("Aktenplaneintrag").split("|"),
-            "sachbearbeiter": akte.property("Aktenverantwortlicher"),
-        }
+        record = self._case_record(akte)
+        record["sachbearbeiter"] = akte.property("Aktenverantwortlicher")
 
         self.logger.debug("Found Aktenzeichen %s", record)
         return (akte.property("system:objectId"), record)
+
+    async def get_running_cases(self, user):
+        """Listet alle laufenden Vorgaenge eines Aktenverantwortlichen auf.
+
+        Gesucht wird ueber die Bedingung ``Aktenverantwortlicher=@user AND
+        Aktenstatus=@status``; der Status ist fest auf ``laufend`` gesetzt. Der
+        ``Akteninhalt`` wird bewusst nicht mitgelesen, damit die Liste auch bei
+        vielen Treffern kompakt bleibt - Details liefert
+        :meth:`get_aktenzeichen`.
+
+        :param user: Benutzerkuerzel des Aktenverantwortlichen (z. B. ``"gisch"``).
+            Enaio vergleicht ohne Beachtung der Gross-/Kleinschreibung.
+        :returns: Liste der Vorgaenge; leer, wenn es keine Treffer gibt.
+        """
+
+        objects = await self._search(
+            "SELECT system:objectId, Aktenzeichen, Aktenbezeichnung, "
+            "Kategorisierung, Aktenplaneintrag, Aktenstatus "
+            "FROM OSTPL_AA "
+            "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status",
+            {"user": user, "status": RUNNING_CASE_STATUS},
+            context=f"Laufende Vorgaenge von {user}",
+        )
+
+        cases = []
+        for akte in objects:
+            case = self._case_record(akte)
+            case["status"] = akte.property("Aktenstatus")
+            case["object_id"] = akte.property("system:objectId")
+            cases.append(case)
+
+        self.logger.info("Laufende Vorgaenge von %s: %d Treffer", user, len(cases))
+        return cases
 
     async def get_document_list(self, parent_object_id):
         """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""

@@ -11,7 +11,7 @@ from typing import Annotated, List, Optional
 from fastapi import HTTPException
 
 import vorlage
-from EnaioBackend import EnaioBackend
+from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
 
@@ -160,7 +160,10 @@ mcp = FastMCP(
                 "identifiziert, z. B. 'DS.1.2-2024-1234'. Wird ein Vorgang, eine Akte, ein Fall "
                 "oder ein Aktenzeichen erwähnt, ist get_case_metadata das passende Tool. "
                 "Dokumente werden über ihre Dokument-ID referenziert, die man aus dem "
-                "'documents'-Feld der get_case_metadata-Antwort erhält."
+                "'documents'-Feld der get_case_metadata-Antwort erhält. "
+                "Wird nach allen offenen bzw. laufenden Vorgängen einer Person gefragt "
+                "('welche Vorgänge laufen bei mir', 'offene Akten von ...'), ist "
+                "list_running_cases das passende Tool."
         ),
 )
 
@@ -204,6 +207,50 @@ async def get_case_metadata(
         record["documents"] = await backend.get_document_list(akte)
 
         return record
+
+
+@mcp.tool(
+        annotations=ToolAnnotations(
+                title="Laufende Vorgänge auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_running_cases(
+        user: Annotated[
+                str,
+                "Benutzerkürzel des Aktenverantwortlichen, z. B. 'gisch'. "
+                "Groß-/Kleinschreibung spielt keine Rolle.",
+        ],
+        ctx: Context,
+) -> dict:
+        """
+        Listet alle laufenden (offenen, noch nicht abgeschlossenen) Vorgänge auf,
+        für die der angegebene Benutzer als Aktenverantwortlicher eingetragen ist.
+
+        Nutze dieses Tool, wenn nach einer Übersicht gefragt wird - etwa "welche
+        Vorgänge laufen bei mir", "meine offenen Akten" oder "woran arbeitet
+        Person X gerade" - also immer dann, wenn noch kein konkretes Aktenzeichen
+        bekannt ist.
+
+        Zurückgegeben wird eine kompakte Liste ohne Akteninhalt. Zu jedem Treffer
+        liefert 'reference_nr' das Aktenzeichen, mit dem sich über
+        get_case_metadata Details und die Dokumentliste nachladen lassen.
+
+        :param user: Benutzerkürzel des Aktenverantwortlichen.
+        """
+
+        await ctx.info(f"Suche laufende Vorgänge von {user} in ENAIO")
+        cases = await backend.get_running_cases(user)
+
+        return {
+                "user": user,
+                "status": RUNNING_CASE_STATUS,
+                "count": len(cases),
+                "cases": cases,
+        }
 
 
 @mcp.tool(
