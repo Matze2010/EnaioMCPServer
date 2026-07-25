@@ -22,6 +22,19 @@ def _akte_object():
     }
 
 
+def _running_case_object(object_id, aktenzeichen, title="Titel", topics="A|B"):
+    return {
+        "properties": {
+            "system:objectId": {"value": object_id},
+            "Aktenzeichen": {"value": aktenzeichen},
+            "Aktenbezeichnung": {"value": title},
+            "Kategorisierung": {"value": "Standard"},
+            "Aktenplaneintrag": {"value": topics},
+            "Aktenstatus": {"value": "laufend"},
+        }
+    }
+
+
 def _child_object(identifier, title):
     return {
         "properties": {
@@ -64,6 +77,65 @@ async def test_search_sends_expected_query_envelope(make_backend):
     assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
     assert "limit" not in query
+
+
+async def test_get_running_cases_sends_expected_query(make_backend):
+    captured = {}
+
+    def handler(request):
+        captured["body"] = request.content
+        return httpx.Response(200, json={"objects": []})
+
+    backend = make_backend(handler)
+    await backend.get_running_cases("gisch")
+
+    query = json.loads(captured["body"])["query"]
+    assert query["parameters"] == {"user": "gisch", "status": "laufend"}
+    assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
+    assert query["options"] == {"Rights": 0, "RegisterContext": 0}
+
+    statement = query["statement"]
+    assert "FROM OSTPL_AA " in statement
+    assert "Aktenverantwortlicher=@user" in statement
+    assert "Aktenstatus=@status" in statement
+    # Der Akteninhalt wird bewusst nicht mitgelesen (kompakte Liste).
+    assert "Akteninhalt" not in statement
+
+
+async def test_get_running_cases_maps_records(make_backend):
+    objects = [
+        _running_case_object("15645", "DS.5.1-2022-577", "Erster Vorgang", "Datenschutz|OWi"),
+        _running_case_object("17776", "DS.7.2-2022-695", "Zweiter Vorgang"),
+    ]
+    backend = make_backend(lambda request: httpx.Response(200, json={"objects": objects}))
+
+    cases = await backend.get_running_cases("gisch")
+
+    assert cases == [
+        {
+            "reference_nr": "DS.5.1-2022-577",
+            "title": "Erster Vorgang",
+            "category": "Standard",
+            "topics": ["Datenschutz", "OWi"],
+            "status": "laufend",
+            "object_id": "15645",
+        },
+        {
+            "reference_nr": "DS.7.2-2022-695",
+            "title": "Zweiter Vorgang",
+            "category": "Standard",
+            "topics": ["A", "B"],
+            "status": "laufend",
+            "object_id": "17776",
+        },
+    ]
+
+
+async def test_get_running_cases_empty_returns_empty_list(make_backend):
+    """Keine Treffer ist bei einer Auflistung kein Fehler (kein HTTP 404)."""
+    backend = make_backend(_empty)
+
+    assert await backend.get_running_cases("niemand") == []
 
 
 async def test_get_document_query_options_differ(make_backend):
