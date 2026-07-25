@@ -205,7 +205,7 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
                     f'Betreffzeile "{subject_placeholder}" nicht gefunden - Vorlage unerwartet aufgebaut.')
             doc = neu
 
-        doc = doc.replace("<w:sectPr", body + "<w:sectPr", 1)
+        doc = doc.replace("<w:t>[Body]</w:t>", "<w:t>" + body + "</w:t>", 1)
         doc = apply_placeholders(doc, replacements)
         patches["word/document.xml"] = doc.encode("utf-8")
 
