@@ -215,7 +215,8 @@ async def create_case_document(
         )
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        out_name = f"{_sanitize_filename(reference)}_{_sanitize_filename(document_type)}_{timestamp}.docx"
+        suffix = f"_{_sanitize_filename(betreff)}" if betreff else ""
+        out_name = f"{timestamp}_{_sanitize_filename(document_type)}{suffix}.docx"
         out_path = OUTPUT_DIR / out_name
 
         # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck, wenn nicht
@@ -258,13 +259,17 @@ async def create_case_document(
                 out_name,
         )
 
+        try:
+                Path(written).unlink()
+        except OSError as e:
+                await ctx.info(f"Warnung: temporaere Datei {written} konnte nicht geloescht werden: {e}")
+
         return {
                 "reference_nr": reference,
                 "document_type": document_type,
                 "betreff": betreff,
                 "template": mapping["template"],
                 "blocks": len(content),
-                "local_path": str(written),
                 "stored_in_enaio": True,
                 "enaio_object_id": upload.get("objectId"),
         }
