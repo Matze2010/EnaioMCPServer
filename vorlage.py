@@ -5,8 +5,8 @@ schreibt das fertige .docx.
 
 Damit der Briefkopf (Logo, Kopffeld, Fußzeile, Schriftbild) garantiert erhalten
 bleibt, wird die Vorlage NICHT nachgebaut, sondern direkt befüllt: Der erzeugte
-Body wird vor <w:sectPr> in word/document.xml eingefügt und das ZIP neu
-geschrieben. Reine Standardbibliothek, keine externen Abhängigkeiten.
+Body ersetzt den Platzhalter-Absatz [Body] in word/document.xml und das ZIP wird
+neu geschrieben. Reine Standardbibliothek, keine externen Abhängigkeiten.
 
 Die Füll-Logik ist aus dem Skript fill_vorlage.py übernommen und in die Funktion
 fill_document(...) gekapselt, damit sie ohne argparse/Dateizugriff aufrufbar ist.
@@ -73,16 +73,18 @@ def runs_of(block):
     return [{"t": block.get("text", "")}]
 
 
-def para_xml(runs, jc="both", before=120, after=80, ind=None, line=276):
+def para_xml(runs, jc="both", before=120, after=80, ind=None, line=276, pstyle=None):
+    # <w:pStyle> muss laut OOXML-Schema das erste Kind von <w:pPr> sein.
+    styx = f'<w:pStyle w:val="{pstyle}"/>' if pstyle else ""
     indx = f'<w:ind w:left="{ind[0]}" w:hanging="{ind[1]}"/>' if ind else ""
-    ppr = (f'<w:pPr><w:spacing w:before="{before}" w:after="{after}" '
+    ppr = (f'<w:pPr>{styx}<w:spacing w:before="{before}" w:after="{after}" '
            f'w:line="{line}" w:lineRule="auto"/>{indx}<w:jc w:val="{jc}"/></w:pPr>')
     return f'<w:p>{ppr}{"".join(run_xml(r) for r in runs)}</w:p>'
 
 
-def heading_xml(text, size=24, before=240, after=100):
+def heading_xml(text, size=24, before=240, after=100, pstyle=None):
     return para_xml([{"t": text, "b": True, "size": size}], jc="left",
-                    before=before, after=after)
+                    before=before, after=after, pstyle=pstyle)
 
 
 def cell_xml(w, text, header=False):
@@ -114,23 +116,28 @@ def table_xml(header, rows):
     return f"<w:tbl>{tblpr}{grid}{body}</w:tbl>"
 
 
-def build_body(blocks):
+def build_body(blocks, pstyle=None):
+    """Erzeugt den Body aus den Bloecken. pstyle (z.B. "Inhalt") wird als Absatz-
+    Formatvorlage auf alle erzeugten Absaetze angewandt, damit die in der Vorlage
+    vorgegebene Formatierung des [Body]-Platzhalter-Absatzes erhalten bleibt."""
     out = []
     for blk in blocks:
         t = blk.get("type")
         if t == "heading":
-            out.append(heading_xml(blk["text"], size=blk.get("size", 24)))
+            out.append(heading_xml(blk["text"], size=blk.get("size", 24), pstyle=pstyle))
         elif t == "subheading":
             out.append(para_xml([{"t": blk["text"], "b": True, "size": 22}], jc="left",
-                                before=160, after=60))
+                                before=160, after=60, pstyle=pstyle))
         elif t == "para":
             out.append(para_xml(runs_of(blk), jc=blk.get("jc", "both"),
-                                before=blk.get("before", 120), after=blk.get("after", 80)))
+                                before=blk.get("before", 120), after=blk.get("after", 80),
+                                pstyle=pstyle))
         elif t == "listitem":
             runs = list(runs_of(blk))
             num = blk.get("number")
             prefix = {"t": (f"{num}.\t" if num is not None else "–\t")}
-            out.append(para_xml([prefix] + runs, jc="both", before=40, after=40, ind=(420, 420)))
+            out.append(para_xml([prefix] + runs, jc="both", before=40, after=40,
+                                ind=(420, 420), pstyle=pstyle))
         elif t == "table":
             out.append(table_xml(blk["header"], blk["rows"]))
         else:
@@ -182,8 +189,6 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
     if not tpl.exists():
         raise FileNotFoundError(f"Vorlage nicht gefunden: {tpl}")
 
-    body = build_body(blocks)
-
     replacements = dict(fields or {})
     replacements["Datum"] = _aktuelles_datum_de()  # immer aktuell, überschreibt Übergabe
 
@@ -205,7 +210,26 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
                     f'Betreffzeile "{subject_placeholder}" nicht gefunden - Vorlage unerwartet aufgebaut.')
             doc = neu
 
-        doc = doc.replace("<w:t>[Body]</w:t>", "<w:t>" + body + "</w:t>", 1)
+        # Den [Body]-Platzhalter durch den erzeugten Body ersetzen. Der Platzhalter steht
+        # in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>). Da der Body aus
+        # Block-Elementen (<w:p>, <w:tbl>) besteht, muss der GESAMTE Platzhalter-Absatz
+        # ersetzt werden - nicht nur der <w:t>-Text -, damit gueltiges OOXML entsteht.
+        body_pattern = re.compile(
+            r'<w:p\b[^>]*>(?:(?!</w:p>).)*?\[Body\](?:(?!</w:p>).)*?</w:p>', re.DOTALL)
+        m_body = body_pattern.search(doc)
+        if m_body is not None:
+            # Die im Platzhalter-Absatz vorgegebene Absatz-Formatvorlage (z.B. "Inhalt")
+            # muss erhalten bleiben und wird auf alle erzeugten Body-Absaetze uebertragen.
+            m_style = re.search(r'<w:pStyle\s+w:val="([^"]+)"', m_body.group(0))
+            body = build_body(blocks, pstyle=m_style.group(1) if m_style else None)
+            doc = doc[:m_body.start()] + body + doc[m_body.end():]
+        else:
+            # Fallback: [Body] evtl. ohne umschliessenden Absatz oder gar nicht vorhanden.
+            body = build_body(blocks)
+            if "[Body]" in doc:
+                doc = doc.replace("[Body]", body, 1)
+            else:
+                doc = doc.replace("<w:sectPr", body + "<w:sectPr", 1)
         doc = apply_placeholders(doc, replacements)
         patches["word/document.xml"] = doc.encode("utf-8")
 
