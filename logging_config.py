@@ -17,6 +17,10 @@ import os
 # Betriebs-Trace.
 LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 
+# Logger der Anwendung, auf die das Level zusaetzlich explizit gesetzt wird
+# (Begruendung siehe configure_logging).
+APP_LOGGERS = ("EnaioBackend", "EnaioMCP")
+
 
 def resolve_log_level(raw: str | None = None) -> int:
     """Ermittelt das numerische Log-Level aus ``LOG_LEVEL`` (Fallback INFO)."""
@@ -31,11 +35,12 @@ def configure_logging() -> int:
     """Konfiguriert das prozessweite Logging und liefert das gesetzte Level.
 
     ``basicConfig`` ist ein No-op, sobald der Root-Logger bereits Handler hat
-    (z. B. durch uvicorn/fastmcp). Daher wird das Level anschliessend auf dem
-    Anwendungs-Logger ``EnaioBackend`` zusaetzlich explizit gesetzt, damit die
-    ``LOG_LEVEL``-Vorgabe in jedem Startpfad wirkt.
+    (z. B. durch uvicorn/fastmcp). Daher wird das Level anschliessend auf den
+    Anwendungs-Loggern aus ``APP_LOGGERS`` zusaetzlich explizit gesetzt, damit
+    die ``LOG_LEVEL``-Vorgabe in jedem Startpfad wirkt.
     """
     level = resolve_log_level()
     logging.basicConfig(level=level, format=LOG_FORMAT)
-    logging.getLogger("EnaioBackend").setLevel(level)
+    for name in APP_LOGGERS:
+        logging.getLogger(name).setLevel(level)
     return level
