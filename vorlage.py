@@ -176,22 +176,94 @@ def build_body(blocks, pstyle=None):
     return "".join(out)
 
 
-def clean_settings(zin_names, read):
+def _clean_settings(zin):
     """Entfernt einen toten attachedTemplate-Verweis, falls vorhanden."""
     patches = {}
+    names = zin.namelist()
     sp = "word/settings.xml"
     rp = "word/_rels/settings.xml.rels"
-    if sp in zin_names:
-        s = read(sp).decode("utf-8")
+    if sp in names:
+        s = zin.read(sp).decode("utf-8")
         if "attachedTemplate" in s:
             s = re.sub(r'<w:attachedTemplate[^>]*/>', '', s)
             patches[sp] = s.encode("utf-8")
-    if rp in zin_names:
-        r = read(rp).decode("utf-8")
+    if rp in names:
+        r = zin.read(rp).decode("utf-8")
         if "attachedTemplate" in r:
             r = re.sub(r'<Relationship\b[^>]*attachedTemplate[^>]*/>', '', r)
             patches[rp] = r.encode("utf-8")
     return patches
+
+
+def _replace_subject_placeholder(doc, placeholder, betreff):
+    """Ersetzt den Betreff-Platzhalter; ohne Betreff wird er entfernt.
+
+    Nur ein tatsaechlich angeforderter, aber fehlender Betreff-Platzhalter ist ein
+    Vorlagenfehler. Fehlt der Platzhalter ohne Betreff, ist das unkritisch.
+
+    :raises ValueError: wenn ein Betreff gesetzt ist, der Platzhalter aber fehlt.
+    """
+    doc, n = replace_subject(doc, placeholder, betreff or "")
+    if n == 0 and betreff:
+        raise ValueError(
+            f'Betreff-Platzhalter "{placeholder}" nicht gefunden - '
+            f'Vorlage unerwartet aufgebaut.')
+    return doc
+
+
+def _replace_body_placeholder(doc, blocks):
+    """Ersetzt den [Body]-Platzhalter durch den aus blocks erzeugten Inhalt.
+
+    Der Platzhalter steht in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>).
+    Da der Body aus Block-Elementen (<w:p>, <w:tbl>) besteht, muss der GESAMTE
+    Platzhalter-Absatz ersetzt werden - nicht nur der <w:t>-Text -, damit gueltiges
+    OOXML entsteht. Die im Platzhalter-Absatz vorgegebene Absatz-Formatvorlage
+    (z.B. "Inhalt") wird dabei auf alle erzeugten Body-Absaetze uebertragen.
+    """
+    body_pattern = re.compile(
+        r'<w:p\b[^>]*>(?:(?!</w:p>).)*?\[Body\](?:(?!</w:p>).)*?</w:p>', re.DOTALL)
+    m_body = body_pattern.search(doc)
+    if m_body is not None:
+        m_style = re.search(r'<w:pStyle\s+w:val="([^"]+)"', m_body.group(0))
+        body = build_body(blocks, pstyle=m_style.group(1) if m_style else None)
+        return doc[:m_body.start()] + body + doc[m_body.end():]
+
+    # Fallback: [Body] evtl. ohne umschliessenden Absatz oder gar nicht vorhanden.
+    body = build_body(blocks)
+    if "[Body]" in doc:
+        return doc.replace("[Body]", body, 1)
+    return doc.replace("<w:sectPr", body + "<w:sectPr", 1)
+
+
+def _patch_placeholder_files(zin, patches, replacements):
+    """Ersetzt Platzhalter in Kopf-/Fusszeilen und Fuss-/Endnoten.
+
+    document.xml wird bewusst ausgespart - es wird vom Aufrufer ueber die
+    doc-Variable behandelt, damit die Body-Einfuegung erhalten bleibt.
+    """
+    for n in zin.namelist():
+        if re.fullmatch(r"word/(header|footer|footnotes|endnotes)\d*\.xml", n):
+            src = patches.get(n)
+            text = src.decode("utf-8") if src is not None else zin.read(n).decode("utf-8")
+            patches[n] = apply_placeholders(text, replacements).encode("utf-8")
+
+
+def _write_docx(zin, patches, out_path):
+    """Schreibt das Ziel-ZIP: gepatchte Eintraege ersetzen, Rest unveraendert.
+
+    Zeitstempel und Dateiattribute der Vorlage bleiben erhalten.
+    """
+    infos = {i.filename: i for i in zin.infolist()}
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n in zin.namelist():
+            data = patches.get(n, zin.read(n))
+            zi = zipfile.ZipInfo(n, date_time=infos[n].date_time)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.external_attr = infos[n].external_attr
+            zout.writestr(zi, data)
+    return out
 
 
 def fill_document(template_path, blocks, out_path, betreff=None,
@@ -225,64 +297,18 @@ def fill_document(template_path, blocks, out_path, betreff=None,
     replacements["Datum"] = _aktuelles_datum_de()  # immer aktuell, überschreibt Übergabe
 
     with zipfile.ZipFile(tpl, "r") as zin:
-        names = zin.namelist()
-        infos = {i.filename: i for i in zin.infolist()}
-        read = lambda n: zin.read(n)
-        patches = clean_settings(names, read)
-        doc = read("word/document.xml").decode("utf-8")
+        patches = _clean_settings(zin)
+
+        doc = zin.read("word/document.xml").decode("utf-8")
         if "<w:sectPr" not in doc:
             raise ValueError("Kein <w:sectPr> in document.xml gefunden - Vorlage unerwartet aufgebaut.")
 
         if subject_placeholder:
-            # Betreff-Platzhalter (z.B. [Betreff]) ersetzen. Ohne Betreff wird der
-            # Platzhalter entfernt, damit er nicht woertlich im Dokument stehen bleibt.
-            doc, n = replace_subject(doc, subject_placeholder, betreff or "")
-            # Nur ein tatsaechlich angeforderter, aber fehlender Betreff-Platzhalter ist
-            # ein Vorlagenfehler. Fehlt der Platzhalter ohne Betreff, ist das unkritisch.
-            if n == 0 and betreff:
-                raise ValueError(
-                    f'Betreff-Platzhalter "{subject_placeholder}" nicht gefunden - '
-                    f'Vorlage unerwartet aufgebaut.')
-
-        # Den [Body]-Platzhalter durch den erzeugten Body ersetzen. Der Platzhalter steht
-        # in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>). Da der Body aus
-        # Block-Elementen (<w:p>, <w:tbl>) besteht, muss der GESAMTE Platzhalter-Absatz
-        # ersetzt werden - nicht nur der <w:t>-Text -, damit gueltiges OOXML entsteht.
-        body_pattern = re.compile(
-            r'<w:p\b[^>]*>(?:(?!</w:p>).)*?\[Body\](?:(?!</w:p>).)*?</w:p>', re.DOTALL)
-        m_body = body_pattern.search(doc)
-        if m_body is not None:
-            # Die im Platzhalter-Absatz vorgegebene Absatz-Formatvorlage (z.B. "Inhalt")
-            # muss erhalten bleiben und wird auf alle erzeugten Body-Absaetze uebertragen.
-            m_style = re.search(r'<w:pStyle\s+w:val="([^"]+)"', m_body.group(0))
-            body = build_body(blocks, pstyle=m_style.group(1) if m_style else None)
-            doc = doc[:m_body.start()] + body + doc[m_body.end():]
-        else:
-            # Fallback: [Body] evtl. ohne umschliessenden Absatz oder gar nicht vorhanden.
-            body = build_body(blocks)
-            if "[Body]" in doc:
-                doc = doc.replace("[Body]", body, 1)
-            else:
-                doc = doc.replace("<w:sectPr", body + "<w:sectPr", 1)
+            doc = _replace_subject_placeholder(doc, subject_placeholder, betreff)
+        doc = _replace_body_placeholder(doc, blocks)
         doc = apply_placeholders(doc, replacements)
         patches["word/document.xml"] = doc.encode("utf-8")
 
-        # Platzhalter auch in Kopf-/Fußzeilen und Fuß-/Endnoten ersetzen. document.xml wird
-        # ausschließlich über die doc-Variable behandelt (Body-Einfügung bleibt erhalten).
-        for n in names:
-            if re.fullmatch(r"word/(header|footer|footnotes|endnotes)\d*\.xml", n):
-                src = patches.get(n)
-                text = src.decode("utf-8") if src is not None else read(n).decode("utf-8")
-                patches[n] = apply_placeholders(text, replacements).encode("utf-8")
+        _patch_placeholder_files(zin, patches, replacements)
 
-        out = Path(out_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
-            for n in names:
-                data = patches.get(n, zin.read(n))
-                zi = zipfile.ZipInfo(n, date_time=infos[n].date_time)
-                zi.compress_type = zipfile.ZIP_DEFLATED
-                zi.external_attr = infos[n].external_attr
-                zout.writestr(zi, data)
-
-    return out
+        return _write_docx(zin, patches, out_path)
