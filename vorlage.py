@@ -57,6 +57,36 @@ def esc(t):
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def replace_subject(doc, placeholder, betreff):
+    """Ersetzt die Betreffzeile placeholder durch betreff in word/document.xml.
+
+    Word teilt Text haeufig ueber mehrere Runs/<w:t>-Elemente auf (z.B. durch
+    Rechtschreibpruefung oder rsid-Aenderungsverfolgung), sodass "Brief" als
+    "B" + "rief" in getrennten Runs vorliegt. Deshalb wird der Platzhalter nicht
+    nur innerhalb eines einzelnen <w:t> gesucht, sondern run-uebergreifend:
+    zwischen den einzelnen Zeichen sind optionale Run-/Text-Grenzen erlaubt.
+
+    :returns: Tupel (neuer_xml, anzahl_ersetzungen). anzahl_ersetzungen=0, wenn
+              der Platzhalter nicht gefunden wurde.
+    """
+    # Optionale Bruecke zwischen zwei Zeichen: Text-Element schliessen, ueber die
+    # Run-Grenze springen (ohne dabei ein weiteres <w:t> zu ueberspringen) und ein
+    # neues Text-Element oeffnen.
+    bridge = r'(?:</w:t>(?:(?!<w:t[ >]).)*?<w:t(?: [^>]*)?>)?'
+    core = bridge.join(re.escape(c) for c in placeholder)
+    # g1: oeffnendes <w:t> des ersten Chunks, g2: evtl. vorangehender Text im selben
+    # Run, g3: evtl. nachfolgender Text im letzten Run, g4: schliessendes </w:t>.
+    pattern = re.compile(
+        r'(<w:t(?: [^>]*)?>)'
+        r'((?:(?!</w:t>).)*?)'
+        + core +
+        r'((?:(?!</w:t>).)*?)'
+        r'(</w:t>)', re.DOTALL)
+    return pattern.subn(
+        lambda m: m.group(1) + m.group(2) + esc(betreff) + m.group(3) + m.group(4),
+        doc, count=1)
+
+
 def run_xml(r):
     rpr = []
     if r.get("b"): rpr.append("<w:b/><w:bCs/>")
@@ -202,13 +232,10 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
             raise ValueError("Kein <w:sectPr> in document.xml gefunden - Vorlage unerwartet aufgebaut.")
 
         if betreff and subject_placeholder:
-            pattern = (r'(<w:t(?: [^>]*)?>)' + re.escape(subject_placeholder) + r'(</w:t>)')
-            neu, n = re.subn(pattern,
-                             lambda m: m.group(1) + esc(betreff) + m.group(2), doc, count=1)
+            doc, n = replace_subject(doc, subject_placeholder, betreff)
             if n == 0:
                 raise ValueError(
                     f'Betreffzeile "{subject_placeholder}" nicht gefunden - Vorlage unerwartet aufgebaut.')
-            doc = neu
 
         # Den [Body]-Platzhalter durch den erzeugten Body ersetzen. Der Platzhalter steht
         # in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>). Da der Body aus
