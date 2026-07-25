@@ -5,8 +5,8 @@ schreibt das fertige .docx.
 
 Damit der Briefkopf (Logo, Kopffeld, Fußzeile, Schriftbild) garantiert erhalten
 bleibt, wird die Vorlage NICHT nachgebaut, sondern direkt befüllt: Der erzeugte
-Body wird vor <w:sectPr> in word/document.xml eingefügt und das ZIP neu
-geschrieben. Reine Standardbibliothek, keine externen Abhängigkeiten.
+Body ersetzt den Platzhalter-Absatz [Body] in word/document.xml und das ZIP wird
+neu geschrieben. Reine Standardbibliothek, keine externen Abhängigkeiten.
 
 Die Füll-Logik ist aus dem Skript fill_vorlage.py übernommen und in die Funktion
 fill_document(...) gekapselt, damit sie ohne argparse/Dateizugriff aufrufbar ist.
@@ -205,7 +205,19 @@ def fill_document(template_path, blocks, out_path, betreff=None, subject_placeho
                     f'Betreffzeile "{subject_placeholder}" nicht gefunden - Vorlage unerwartet aufgebaut.')
             doc = neu
 
-        doc = doc.replace("<w:t>[Body]</w:t>", "<w:t>" + body + "</w:t>", 1)
+        # Den [Body]-Platzhalter durch den erzeugten Body ersetzen. Der Platzhalter steht
+        # in einem eigenen Absatz (<w:p>...<w:t>[Body]</w:t>...</w:p>). Da der Body aus
+        # Block-Elementen (<w:p>, <w:tbl>) besteht, muss der GESAMTE Platzhalter-Absatz
+        # ersetzt werden - nicht nur der <w:t>-Text -, damit gueltiges OOXML entsteht.
+        body_pattern = re.compile(
+            r'<w:p\b[^>]*>(?:(?!</w:p>).)*?\[Body\](?:(?!</w:p>).)*?</w:p>', re.DOTALL)
+        doc, n_body = body_pattern.subn(lambda m: body, doc, count=1)
+        if n_body == 0:
+            # Fallback: [Body] evtl. ohne umschliessenden Absatz - Body vor <w:sectPr> einfuegen.
+            if "[Body]" in doc:
+                doc = doc.replace("[Body]", body, 1)
+            else:
+                doc = doc.replace("<w:sectPr", body + "<w:sectPr", 1)
         doc = apply_placeholders(doc, replacements)
         patches["word/document.xml"] = doc.encode("utf-8")
 
