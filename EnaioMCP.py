@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import base64
 
 from datetime import datetime
@@ -26,7 +25,7 @@ username = os.environ.get('USERNAME', 'DEFAULT_USERNAME')
 password = os.environ.get('PASSWORD', 'DEFAULT_PASSWORD')
 
 backend = EnaioBackend(url=url)
-backend.setAuth(username, password)
+backend.set_auth(username, password)
 
 
 # Verzeichnis mit den .docx-Hausvorlagen sowie Ausgabeverzeichnis fuer die
@@ -53,6 +52,104 @@ DOCUMENT_TEMPLATES = {
 def _sanitize_filename(text: str) -> str:
         """Ersetzt fuer Dateinamen problematische Zeichen durch Unterstriche."""
         return re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip()).strip("._") or "dokument"
+
+
+def _resolve_template(document_type: str):
+        """Ermittelt die Vorlagendatei zu einem Dokumententyp.
+
+        :returns: Tupel ``(vorlagenname, pfad)``.
+        :raises HTTPException: 400 bei unbekanntem Typ, 404 bei fehlender Datei.
+        """
+
+        type_key = (document_type or "").strip().lower()
+        mapping = DOCUMENT_TEMPLATES.get(type_key)
+        if mapping is None:
+                available = ", ".join(sorted(DOCUMENT_TEMPLATES)) or "(keine)"
+                raise HTTPException(
+                        status_code=400,
+                        detail=(
+                                f"Unbekannter Dokumententyp '{document_type}'. "
+                                f"Verfuegbare Typen: {available}."
+                        ),
+                )
+
+        template_name = mapping["template"]
+        template_path = ASSETS_DIR / template_name
+        if not template_path.exists():
+                raise HTTPException(
+                        status_code=404,
+                        detail=(
+                                f"Vorlage fuer Dokumententyp '{document_type}' nicht gefunden: "
+                                f"{template_path}."
+                        ),
+                )
+
+        return template_name, template_path
+
+
+def _output_path(document_type: str, betreff: Optional[str]):
+        """Baut Zielpfad und Dateinamen des zu erzeugenden Dokuments.
+
+        Schema: ``<Zeitstempel>_<Dokumententyp>[_<Betreff>].docx``.
+
+        :returns: Tupel ``(pfad, dateiname)``.
+        """
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = f"_{_sanitize_filename(betreff)}" if betreff else ""
+        out_name = f"{timestamp}_{_sanitize_filename(document_type)}{suffix}.docx"
+        return OUTPUT_DIR / out_name, out_name
+
+
+def _render_document(template_path, content, out_path, betreff, fields):
+        """Fuellt die Vorlage und meldet Vorlagenfehler als HTTP 422."""
+
+        try:
+                return vorlage.fill_document(
+                        template_path,
+                        content,
+                        out_path,
+                        betreff=betreff,
+                        fields=fields,
+                )
+        except (ValueError, FileNotFoundError) as e:
+                raise HTTPException(status_code=422, detail=f"Fehler beim Fuellen der Vorlage: {e}")
+
+
+async def _enforce_upload_rate_limit():
+        """Belegt einen Upload-Slot oder lehnt mit HTTP 429 ab (kein Warten)."""
+
+        try:
+                await upload_limiter.acquire()
+        except RateLimitExceeded as e:
+                raise HTTPException(
+                        status_code=429,
+                        detail=str(e),
+                        headers={"Retry-After": str(e.retry_after)},
+                )
+
+
+async def _discard_temp_file(path, ctx: Context):
+        """Loescht die lokal erzeugte Datei; ein Fehlschlag ist nicht kritisch."""
+
+        try:
+                Path(path).unlink()
+        except OSError as e:
+                await ctx.info(f"Warnung: temporaere Datei {path} konnte nicht geloescht werden: {e}")
+
+
+async def _load_document_content(document_id: str, content_format: str, ctx: Context):
+        """Laedt den Inhalt eines Dokuments in der gewuenschten Repraesentation.
+
+        :param content_format: ``"file"`` fuer die Originaldatei (bytes), sonst
+            die Text-Rendition (str).
+        """
+
+        what = "Datei" if content_format == "file" else "Textinhalt"
+        await ctx.info(f"Lade {what} zum Dokument {document_id}")
+
+        document = await backend.get_document(document_id, content_format)
+        return document["content"]
 
 
 mcp = FastMCP(
@@ -101,11 +198,10 @@ async def get_case_metadata(
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
-        akte, record = await backend.getAktenzeichen(reference)
+        akte, record = await backend.get_aktenzeichen(reference)
 
         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference} ({akte})")
-        documents = await backend.getDocumentList(akte)
-        record["documents"] = documents
+        record["documents"] = await backend.get_document_list(akte)
 
         return record
 
@@ -193,70 +289,30 @@ async def create_case_document(
                 aktuelles Datum, [Aktenzeichen] faellt auf reference zurueck.
         """
 
-        type_key = (document_type or "").strip().lower()
-        mapping = DOCUMENT_TEMPLATES.get(type_key)
-        if mapping is None:
-                available = ", ".join(sorted(DOCUMENT_TEMPLATES)) or "(keine)"
-                raise HTTPException(
-                        status_code=400,
-                        detail=(
-                                f"Unbekannter Dokumententyp '{document_type}'. "
-                                f"Verfuegbare Typen: {available}."
-                        ),
-                )
-
-        template_path = ASSETS_DIR / mapping["template"]
-        if not template_path.exists():
-                raise HTTPException(
-                        status_code=404,
-                        detail=(
-                                f"Vorlage fuer Dokumententyp '{document_type}' nicht gefunden: "
-                                f"{template_path}."
-                        ),
-                )
+        template_name, template_path = _resolve_template(document_type)
 
         await ctx.info(
                 f"Erzeuge {document_type}-Dokument fuer Vorgang {reference} aus Vorlage "
-                f"{mapping['template']}"
+                f"{template_name}"
         )
 
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        suffix = f"_{_sanitize_filename(betreff)}" if betreff else ""
-        out_name = f"{timestamp}_{_sanitize_filename(document_type)}{suffix}.docx"
-        out_path = OUTPUT_DIR / out_name
+        out_path, out_name = _output_path(document_type, betreff)
 
         # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck, wenn nicht
         # ausdruecklich angegeben. [Datum] setzt fill_document stets auf das aktuelle Datum.
         doc_fields = dict(fields or {})
         doc_fields.setdefault("Aktenzeichen", reference)
 
-        try:
-                written = vorlage.fill_document(
-                        template_path,
-                        content,
-                        out_path,
-                        betreff=betreff,
-                        fields=doc_fields,
-                )
-        except (ValueError, FileNotFoundError) as e:
-                raise HTTPException(status_code=422, detail=f"Fehler beim Fuellen der Vorlage: {e}")
+        written = _render_document(template_path, content, out_path, betreff, doc_fields)
 
         await ctx.info(f"Dokument lokal gespeichert unter {written}")
 
         # Rate-Limit pruefen, bevor tatsaechlich hochgeladen wird: ein belegter
-        # Slot entspricht damit einem echten Upload-Versuch. Bei Ueberschreitung
-        # sofortige Ablehnung mit HTTP 429 (kein Warten).
-        try:
-                await upload_limiter.acquire()
-        except RateLimitExceeded as e:
-                raise HTTPException(
-                        status_code=429,
-                        detail=str(e),
-                        headers={"Retry-After": str(e.retry_after)},
-                )
+        # Slot entspricht damit einem echten Upload-Versuch.
+        await _enforce_upload_rate_limit()
 
         await ctx.info(f"Lade Dokument in Vorgang {reference} nach Enaio hoch")
-        upload = await backend.uploadDocument(
+        upload = await backend.upload_document(
                 reference,
                 written,
                 document_type,
@@ -264,36 +320,17 @@ async def create_case_document(
                 out_name,
         )
 
-        try:
-                Path(written).unlink()
-        except OSError as e:
-                await ctx.info(f"Warnung: temporaere Datei {written} konnte nicht geloescht werden: {e}")
+        await _discard_temp_file(written, ctx)
 
         return {
                 "reference_nr": reference,
                 "document_type": document_type,
                 "betreff": betreff,
-                "template": mapping["template"],
+                "template": template_name,
                 "blocks": len(content),
                 "stored_in_enaio": True,
                 "enaio_object_id": upload.get("objectId"),
         }
-
-
-# @mcp.tool
-# async def list_case_documents(reference: Annotated[str, "case reference number"], ctx: Context) -> List:
-#         """
-#         Erstelle eine Liste aller Dokumente, die zu einem laufenden Vorgang gehören.
-#         :param reference: Vorgangsnummer
-#         """
-
-#         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference}")
-
-#         json = None
-#         akte, record = await backend.getAktenzeichen(reference)
-#         result = await backend.getDocumentList(akte[0])
-
-#         return {"reference_nr": reference, "documents": result }
 
 
 @mcp.tool(
@@ -320,11 +357,7 @@ async def access_document_fulltext(
         :param document: Dokument-ID.
         """
 
-        await ctx.info(f"Lade Textinhalt zum Dokument {document}")
-
-        document, json = await backend.getDocument(document, "text")
-
-        return document["content"]
+        return await _load_document_content(document, "text", ctx)
 
 
 @mcp.tool(
@@ -350,12 +383,9 @@ async def download_document(
         :param document: Dokument-ID.
         """
 
-        await ctx.info(f"Lade Datei zum Dokument {document}")
+        content = await _load_document_content(document, "file", ctx)
 
-        document, json = await backend.getDocument(document, "file")
-
-        return base64.b64encode(document["content"])
-
+        return base64.b64encode(content).decode("ascii")
 
 
 @mcp.resource("document://{document}/fulltext")
@@ -365,24 +395,18 @@ async def resource_access_document_fulltext(document: str, ctx: Context) -> str:
         :param document: Dokument-ID
         """
 
-        await ctx.info(f"Lade Textinhalt zum Dokument {document}")
+        return await _load_document_content(document, "text", ctx)
 
-        document, json = await backend.getDocument(document, "text")
-
-        return document["content"]
 
 @mcp.resource("document://{document}/file")
-async def resource_download_document(document: str, ctx: Context) -> str:
+async def resource_download_document(document: str, ctx: Context) -> bytes:
         """
         Access document and download as file. The document's content is provided as binary representation.
-        :param document_nr: Dokument-ID
+        :param document: Dokument-ID
         """
 
-        await ctx.info(f"Lade Datei zum Dokument {document}")
+        return await _load_document_content(document, "file", ctx)
 
-        document, json = await backend.getDocument(document, "file")
-
-        return document["content"]
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
