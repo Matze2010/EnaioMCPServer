@@ -1,31 +1,59 @@
-import os
 import json
 import uuid
-import requests
 import httpx
 import logging
-import urllib3
 import re
 import unicodedata
-import tempfile
 
 from pathlib import Path
-from datetime import datetime
-from pydantic import BaseModel, Field
+from typing import NamedTuple
 from fastapi import HTTPException
 
-AKTENZEICHEN_REGEX = "DS\\.[1-9]\\.[1-9]-(202[2-6])-(\\d|[1-9]\\d{1,5})"
-DOCUMENT_REGEX = "(202[2-6])-(\\d|[1-9]\\d{1,6})|(\\d{1,12})"
-
 # Objekttyp-ID der Vorgangsdokumente (OSTPL_AA_DOKUMENT), unter der neu erzeugte
-# Dokumente in einen Vorgang eingehaengt werden. Entspricht dem Eintrag "262146"
-# in EnaioBackend.settings.
+# Dokumente in einen Vorgang eingehaengt werden.
 UPLOAD_OBJECT_TYPE_ID = "262146"
 
 # MIME-Type fuer die erzeugten Word-Dokumente (.docx).
 DOCX_MIME_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+
+# Standardwert fuer handleDeletedDocuments in Suchanfragen.
+EXCLUDE_DELETED = "DELETED_DOCUMENTS_EXCLUDE"
+
+# Standard-Optionen einer Suchanfrage.
+DEFAULT_SEARCH_OPTIONS = {"Rights": 0, "RegisterContext": 0}
+
+SEARCH_PATH = "/api/dms/objects/search"
+
+
+class ObjectType(NamedTuple):
+    """Beschreibt einen in Enaio abgefragten Objekttyp.
+
+    :ivar name:        Sprechender Typname in den Rueckgabedaten ("file", "mail", ...).
+    :ivar table:       Enaio-Tabelle, aus der gelesen wird.
+    :ivar id_field:    Feld, das die nach aussen sichtbare Dokument-ID traegt.
+    :ivar title_field: Feld mit dem Titel/Betreff des Dokuments.
+    """
+
+    name: str
+    table: str
+    id_field: str
+    title_field: str
+
+
+# Alle Objekttypen, die als Dokumente eines Vorgangs gelten. Der Schluessel ist
+# die system:objectTypeId, ueber die ein geladenes Objekt zugeordnet wird.
+OBJECT_TYPES = {
+    UPLOAD_OBJECT_TYPE_ID: ObjectType(
+        "file", "OSTPL_AA_DOKUMENT", "AA_DOK_PENR", "Betreff"
+    ),
+    "393216": ObjectType("mail", "EMail", "system:objectId", "MAIL_SUBJECT"),
+    "262144": ObjectType(
+        "vermerk", "OSTPL_AA_AN", "system:objectId", "OSTPL_AA_AN_CONTACTMEDIA"
+    ),
+}
+
 
 def standardize_text(text: str) -> str:
     # Convert text to lowercase
@@ -36,278 +64,330 @@ def standardize_text(text: str) -> str:
     text = text.replace("\n", " ")
     # Normalize unicode characters to ASCII
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8")
-    # Remove punctuation
-    # text = re.sub(r'[^ws]', '', text)
     # Remove extra whitespace
-    text = re.sub("\W+", " ", text)
+    text = re.sub(r"\W+", " ", text)
     # Optionally truncate content if it's very large
     text = " ".join(text.split()[:5000])
     return text
+
 
 class EnaioDict(dict):
     def property(self, key):
         return self["properties"][key]["value"]
 
 
+def encode_multipart(parts, boundary: str) -> bytes:
+    """Setzt einen Multipart-Body aus vorbereiteten Parts zusammen.
+
+    :param parts: Liste von ``(header_zeilen, payload)``. ``header_zeilen`` ist
+        eine Liste von ``bytes`` ohne Zeilenumbruch, ``payload`` der Rohinhalt
+        des Parts.
+    :param boundary: Trennzeichenkette ohne fuehrende Bindestriche.
+    :returns: Der vollstaendige Body inklusive Abschlussgrenze.
+    """
+
+    crlf = b"\r\n"
+    dash = b"--"
+    boundary_bytes = boundary.encode("ascii")
+
+    chunks = []
+    for headers, payload in parts:
+        chunks.append(dash + boundary_bytes + crlf)
+        for header in headers:
+            chunks.append(header + crlf)
+        chunks.append(crlf)
+        chunks.append(payload)
+        chunks.append(crlf)
+    chunks.append(dash + boundary_bytes + dash + crlf)
+
+    return b"".join(chunks)
+
+
 class EnaioBackend:
 
     def __init__(self, url):
 
-        urllib3.disable_warnings()
-
-        self.backendUrl = url
+        self.backend_url = url
 
         self.session = httpx.AsyncClient(verify=False)
 
         self.logger = logging.getLogger(__name__)
 
-        self.settings = {
-            "262146": {
-                "type": "file",
-                "table": "OSTPL_AA_DOKUMENT",
-                "fields": ["AA_DOK_PENR", "Betreff"],
-            },
-            "393216": {
-                "type": "mail",
-                "table": "EMail",
-                "fields": ["system:objectId", "MAIL_SUBJECT"],
-            },
-            "262144": {
-                "type": "vermerk",
-                "table": "OSTPL_AA_AN",
-                "fields": ["system:objectId", "OSTPL_AA_AN_CONTACTMEDIA"],
-            },
-        }
-
-    def setAuth(self, username: str, password: str):
+    def set_auth(self, username: str, password: str):
         self.session.auth = httpx.BasicAuth(username=username, password=password)
 
-    async def getAktenzeichen(self, aktenzeichen):
-        data = None
+    # ------------------------------------------------------------------
+    # Gemeinsame Bausteine fuer alle API-Zugriffe
+    # ------------------------------------------------------------------
 
-        folder_query_params = {
-            "query": {
-                "statement": "SELECT system:objectId, Aktenbezeichnung, Kategorisierung, Aktenverantwortlicher, Aktenplaneintrag, Aktenzeichen, Akteninhalt FROM OSTPL_AA WHERE Aktenzeichen=@aktenzeichen",
-                "skipCount": 0,
-                "handleDeletedDocuments": "DELETED_DOCUMENTS_EXCLUDE",
-                "options": {"Rights": 0, "RegisterContext": 0},
-                "parameters": {"aktenzeichen": aktenzeichen},
-            }
-        }
+    async def _request(self, method, path, *, context, raise_for_status=True, **kwargs):
+        """Fuehrt einen Request gegen die Enaio-API aus und normiert die Fehler.
+
+        Buendelt die Fehlerbehandlung, die andernfalls in jeder Methode
+        wiederholt werden muesste:
+
+        * ``httpx.RequestError``    -> HTTP 503 (Enaio nicht erreichbar)
+        * ``httpx.HTTPStatusError`` -> HTTP 502 (unerwartete Antwort)
+        * alles andere              -> HTTP 500
+
+        :param context: Kurzbeschreibung des Vorgangs fuer die Logmeldung,
+            z. B. ``"Aktenzeichen DS.1.2-2024-1"``.
+        :param raise_for_status: Wenn ``False``, wird der Statuscode nicht
+            geprueft und die Antwort unveraendert zurueckgegeben (fuer Aufrufer,
+            die einzelne Statuscodes selbst behandeln).
+        """
 
         try:
-            self.logger.debug(f"Getting Aktenzeichen {aktenzeichen}")
-            response = await self.session.post(
-                self.backendUrl + "/api/dms/objects/search",
-                json=folder_query_params,
-                headers={"accept": "application/json"},
+            response = await self.session.request(
+                method, self.backend_url + path, **kwargs
             )
-            response.raise_for_status()
-            data = response.json()
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error("Verbindungsfehler zur ENAIO API bei Aktenzeichen %s: %s", aktenzeichen, e)
-            raise HTTPException(
-                status_code=503, detail=f"Error connecting to ENAIO API: {e}"
-            )
-        except Exception as e:
-            # Catch other potential errors during processing
-            self.logger.exception("Interner Fehler beim Abruf von Aktenzeichen %s", aktenzeichen)
-            raise HTTPException(
-                status_code=500, detail=f"An internal error occurred: {e}"
-            )
-
-        if len(data["objects"]) == 0:
-            self.logger.warning("Aktenzeichen '%s' nicht gefunden", aktenzeichen)
-            raise HTTPException(
-                status_code=404, detail=f"Aktenzeichen '{aktenzeichen}' not found"
-            )
-
-        akteJSON = EnaioDict(data["objects"][0])
-        record = {
-            "reference_nr": akteJSON.property("Aktenzeichen"),
-            "title": akteJSON.property("Aktenbezeichnung"),
-            "category": akteJSON.property("Kategorisierung"),
-            "topics": akteJSON.property("Aktenplaneintrag").split("|"),
-            "sachbearbeiter": akteJSON.property("Aktenverantwortlicher"),
-        }
-
-        self.logger.debug("Found Aktenzeichen %s", record)
-        return (akteJSON.property("system:objectId"), record)
-
-    async def getDocumentList(self, parentObjectId):
-
-        documents = []
-
-        for key, config in self.settings.items():
-
-            fieldDocIdentifier = config["fields"][0]
-            fieldDocTitle = config["fields"][1]
-            fieldTable = config["table"]
-            docType = config["type"]
-
-            children_query_params = {
-                "query": {
-                    "statement": f"SELECT system:creationDate, system:lastModificationDate, {fieldDocIdentifier} AS documentIdentifier, {fieldDocTitle} AS documentTitle FROM {fieldTable} WHERE system:SDSTA_ID IN (@objectIds)",
-                    "skipCount": 0,
-                    "handleDeletedDocuments": "DELETED_DOCUMENTS_EXCLUDE",
-                    "options": {"Rights": 0, "RegisterContext": 0},
-                    "parameters": {"objectIds": parentObjectId},
-                }
-            }
-
-            try:
-                self.logger.debug(
-                    f"Getting documentlist({docType}) of ParentObjectId {parentObjectId}"
-                )
-                response = await self.session.post(
-                    self.backendUrl + "/api/dms/objects/search",
-                    json=children_query_params,
-                    headers={"accept": "application/json"},
-                )
+            if raise_for_status:
                 response.raise_for_status()
-                data = response.json()
+            return response
 
-            except requests.exceptions.RequestException as e:
-                self.logger.error(
-                    "Verbindungsfehler zur ENAIO API beim Laden der Dokumentliste (%s) zu %s: %s",
-                    docType, parentObjectId, e,
-                )
-                raise HTTPException(
-                    status_code=503, detail=f"Error connecting to ENAIO API: {e}"
-                )
-            except Exception as e:
-                # Catch other potential errors during processing
-                self.logger.exception(
-                    "Interner Fehler beim Laden der Dokumentliste (%s) zu %s", docType, parentObjectId
-                )
-                raise HTTPException(
-                    status_code=500, detail=f"An internal error occurred: {e}"
-                )
-
-            if len(data["objects"]) == 0:
-                self.logger.debug(
-                    f"No children of type {docType} for ParentObjectId {parentObjectId}"
-                )
-                continue
-
-            children = data["objects"]
-
-            for child in children:
-                childDict = EnaioDict(child)
-                document_nr = childDict.property("documentIdentifier")
-
-                documents.append(
-                    {
-                        "type": config["type"],
-                        "id": document_nr,
-                        "name": childDict.property("documentTitle"),
-                        "creationDate": childDict.property("system:creationDate"),
-                        "lastModificationDate": childDict.property(
-                            "system:lastModificationDate"
-                        )
-                    }
-                )
-
-            self.logger.debug(
-                "Children for ParentObjectId %s: %s", parentObjectId, children
-            )
-
-        self.logger.info(
-            "Dokumentliste zu Vorgang %s: %d Dokument(e)", parentObjectId, len(documents)
-        )
-        return documents
-
-    async def getDocument(self, documentId, format):
-
-        ### system:objectId, AA_DOK_PENR, Betreff
-        union_query_params = {
-            "query": {
-                "statement": "SELECT * FROM OSTPL_AA_DOKUMENT where AA_DOK_PENR=@objectId UNION SELECT * FROM OSTPL_AA_AN where system:objectId=@objectId UNION SELECT * FROM EMail where system:objectId=@objectId",
-                "skipCount": 0,
-                "limit": 1,
-                "options": {
-                    "Rights": 0,
-                    "Baseparams": 1,
-                    "RegisterContext": 0,
-                    "FileInfo": 1,
-                },
-                "parameters": {"objectId": documentId},
-            }
-        }
-
-        try:
-            self.logger.debug(f"Getting document {documentId}")
-            response = await self.session.post(
-                self.backendUrl + "/api/dms/objects/search",
-                json=union_query_params,
-                headers={"accept": "application/json"},
-            )
-            response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-            data = response.json()
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error("Verbindungsfehler zur ENAIO API bei Dokument %s: %s", documentId, e)
+        except httpx.RequestError as e:
+            self.logger.error("Verbindungsfehler zur ENAIO API bei %s: %s", context, e)
             raise HTTPException(
                 status_code=503, detail=f"Error connecting to ENAIO API: {e}"
             )
+        except httpx.HTTPStatusError as e:
+            self.logger.error("Unerwartete Antwort der ENAIO API bei %s: %s", context, e)
+            raise HTTPException(
+                status_code=502, detail=f"Unerwartete Antwort der ENAIO API: {e}"
+            )
         except Exception as e:
             # Catch other potential errors during processing
-            self.logger.exception("Interner Fehler beim Abruf von Dokument %s", documentId)
+            self.logger.exception("Interner Fehler bei %s", context)
             raise HTTPException(
                 status_code=500, detail=f"An internal error occurred: {e}"
             )
 
-        if len(data["objects"]) == 0:
-            self.logger.warning("Dokument '%s' nicht gefunden", documentId)
+    async def _search(
+        self,
+        statement,
+        parameters,
+        *,
+        context,
+        options=None,
+        limit=None,
+        handle_deleted=EXCLUDE_DELETED,
+    ):
+        """Fuehrt eine Suche ueber ``/api/dms/objects/search`` aus.
+
+        :param statement: SQL-aehnliches Statement mit ``@name``-Parametern.
+        :param parameters: Zuordnung Parametername -> Wert.
+        :param context: Kurzbeschreibung fuer Logmeldungen.
+        :param options: Abweichende Suchoptionen (Default: ``Rights``/``RegisterContext``).
+        :param limit: Optionale Begrenzung der Treffermenge.
+        :param handle_deleted: Umgang mit geloeschten Dokumenten; ``None`` laesst
+            den Schluessel aus der Anfrage weg.
+        :returns: Liste der Treffer als :class:`EnaioDict`.
+        """
+
+        query = {
+            "statement": statement,
+            "skipCount": 0,
+            "options": options if options is not None else DEFAULT_SEARCH_OPTIONS,
+            "parameters": parameters,
+        }
+        if handle_deleted is not None:
+            query["handleDeletedDocuments"] = handle_deleted
+        if limit is not None:
+            query["limit"] = limit
+
+        self.logger.debug("Suche in ENAIO: %s", context)
+        response = await self._request(
+            "POST",
+            SEARCH_PATH,
+            context=context,
+            json={"query": query},
+            headers={"accept": "application/json"},
+        )
+
+        try:
+            return [EnaioDict(obj) for obj in response.json()["objects"]]
+        except Exception as e:
+            # Unerwartete Antwortstruktur (kein JSON, kein "objects"-Feld, ...).
+            self.logger.exception("Unerwartete Antwort der ENAIO API bei %s", context)
             raise HTTPException(
-                status_code=404, detail=f"Document '{documentId}' not found"
+                status_code=500, detail=f"An internal error occurred: {e}"
             )
 
-        child = EnaioDict(data["objects"][0])
-        self.logger.debug("Dokument: %s", child)
+    def _require_one(self, objects, kind, identifier):
+        """Liefert den ersten Treffer oder wirft HTTP 404."""
 
-        config = self.settings[child.property("system:objectTypeId")]
+        if not objects:
+            self.logger.warning("%s '%s' nicht gefunden", kind, identifier)
+            raise HTTPException(
+                status_code=404, detail=f"{kind} '{identifier}' not found"
+            )
+        return objects[0]
 
-        document = {
-            "type": config["type"],
-            "document_nr": child.property(config["fields"][0]),
-            "name": child.property(config["fields"][1]),
+    @staticmethod
+    def _document_record(child, type_name, *, id_key, id_field, title_field):
+        """Baut den einheitlichen Dokument-Datensatz aus einem Enaio-Objekt."""
+
+        return {
+            "type": type_name,
+            id_key: child.property(id_field),
+            "name": child.property(title_field),
             "creationDate": child.property("system:creationDate"),
             "lastModificationDate": child.property("system:lastModificationDate"),
         }
 
-        if config["type"] == "vermerk":
+    async def _get_content(self, object_id, content_path):
+        """Laedt einen Inhaltsstrom eines Objekts (Datei oder Rendition)."""
+
+        return await self._request(
+            "GET",
+            f"/api/dms/objects/{object_id}/contents/{content_path}",
+            context=f"Inhalt {content_path} von Objekt {object_id}",
+            raise_for_status=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Fachliche Zugriffe
+    # ------------------------------------------------------------------
+
+    async def get_aktenzeichen(self, aktenzeichen):
+        """Laedt die Metadaten eines Vorgangs.
+
+        :returns: Tupel ``(objectId, record)``.
+        """
+
+        objects = await self._search(
+            "SELECT system:objectId, Aktenbezeichnung, Kategorisierung, "
+            "Aktenverantwortlicher, Aktenplaneintrag, Aktenzeichen, Akteninhalt "
+            "FROM OSTPL_AA WHERE Aktenzeichen=@aktenzeichen",
+            {"aktenzeichen": aktenzeichen},
+            context=f"Aktenzeichen {aktenzeichen}",
+        )
+
+        akte = self._require_one(objects, "Aktenzeichen", aktenzeichen)
+        record = {
+            "reference_nr": akte.property("Aktenzeichen"),
+            "title": akte.property("Aktenbezeichnung"),
+            "category": akte.property("Kategorisierung"),
+            "topics": akte.property("Aktenplaneintrag").split("|"),
+            "sachbearbeiter": akte.property("Aktenverantwortlicher"),
+        }
+
+        self.logger.debug("Found Aktenzeichen %s", record)
+        return (akte.property("system:objectId"), record)
+
+    async def get_document_list(self, parent_object_id):
+        """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""
+
+        documents = []
+
+        for object_type in OBJECT_TYPES.values():
+            context = f"Dokumentliste ({object_type.name}) zu {parent_object_id}"
+
+            children = await self._search(
+                "SELECT system:creationDate, system:lastModificationDate, "
+                f"{object_type.id_field} AS documentIdentifier, "
+                f"{object_type.title_field} AS documentTitle "
+                f"FROM {object_type.table} WHERE system:SDSTA_ID IN (@objectIds)",
+                {"objectIds": parent_object_id},
+                context=context,
+            )
+
+            if not children:
+                self.logger.debug("Keine Kinder vom Typ %s zu %s", object_type.name, parent_object_id)
+                continue
+
+            # Die Felder sind im SELECT einheitlich aliasiert, daher fuer alle
+            # Objekttypen dieselben Spaltennamen.
+            documents.extend(
+                self._document_record(
+                    child,
+                    object_type.name,
+                    id_key="id",
+                    id_field="documentIdentifier",
+                    title_field="documentTitle",
+                )
+                for child in children
+            )
+
+            self.logger.debug(
+                "Children for ParentObjectId %s: %s", parent_object_id, children
+            )
+
+        self.logger.info(
+            "Dokumentliste zu Vorgang %s: %d Dokument(e)", parent_object_id, len(documents)
+        )
+        return documents
+
+    async def get_document(self, document_id, content_format):
+        """Laedt ein einzelnes Dokument inklusive Inhalt.
+
+        :param content_format: ``"file"`` fuer die Originaldatei, sonst die
+            Text-Rendition.
+        """
+
+        objects = await self._search(
+            "SELECT * FROM OSTPL_AA_DOKUMENT where AA_DOK_PENR=@objectId "
+            "UNION SELECT * FROM OSTPL_AA_AN where system:objectId=@objectId "
+            "UNION SELECT * FROM EMail where system:objectId=@objectId",
+            {"objectId": document_id},
+            context=f"Dokument {document_id}",
+            options={
+                "Rights": 0,
+                "Baseparams": 1,
+                "RegisterContext": 0,
+                "FileInfo": 1,
+            },
+            limit=1,
+            handle_deleted=None,
+        )
+
+        child = self._require_one(objects, "Document", document_id)
+        self.logger.debug("Dokument: %s", child)
+
+        object_type = OBJECT_TYPES[child.property("system:objectTypeId")]
+
+        document = self._document_record(
+            child,
+            object_type.name,
+            id_key="document_nr",
+            id_field=object_type.id_field,
+            title_field=object_type.title_field,
+        )
+
+        if object_type.name == "vermerk":
             document["content"] = child.property("OSTPL_AA_AN_NOTIZ")
         else:
-            objectId = child.property("system:objectId")
-            if format == "file":
-                document["content"] = await self.getFile(objectId)
+            object_id = child.property("system:objectId")
+            if content_format == "file":
+                document["content"] = await self.get_file(object_id)
             else:
-                document["content"] = await self.getRendition(objectId)
+                document["content"] = await self.get_rendition(object_id)
 
         # Bewusst OHNE document["content"] loggen: der Inhalt kann Volltext
         # oder Binaerdaten (potenziell personenbezogen) enthalten.
-        self.logger.info("Dokument %s geladen (Typ %s)", documentId, document["type"])
+        self.logger.info("Dokument %s geladen (Typ %s)", document_id, document["type"])
 
-        return (document, child)
+        return document
 
-    async def getFile(self, documentId):
-        response = await self.session.get(
-            self.backendUrl + f"/api/dms/objects/{documentId}/contents/file/1"
-        )
-
+    async def get_file(self, document_id):
+        response = await self._get_content(document_id, "file/1")
         return response.content
 
-    async def getRendition(self, documentId) -> str:
-
-        response = await self.session.get(
-            self.backendUrl + f"/api/dms/objects/{documentId}/contents/renditions/text"
-        )
-        if response.status_code == requests.codes.ok:
+    async def get_rendition(self, document_id) -> str:
+        response = await self._get_content(document_id, "renditions/text")
+        if response.status_code == httpx.codes.OK:
             return standardize_text(response.text)
 
+        self.logger.warning(
+            "Keine Text-Rendition fuer Dokument %s (HTTP %s)",
+            document_id,
+            response.status_code,
+        )
         return None
+
+    # ------------------------------------------------------------------
+    # Upload
+    # ------------------------------------------------------------------
 
     def _build_upload_payload(self, parent_id, file_bytes, betreff, filename):
         """Baut den Multipart-Body fuer POST /api/dms/objects.
@@ -349,43 +429,35 @@ class EnaioBackend:
             ]
         }
 
-        boundary = uuid.uuid4().hex
-        crlf = b"\r\n"
-        dash = b"--"
-        boundary_bytes = boundary.encode("ascii")
-
-        parts = []
-
-        # Part 1: Metadaten als JSON.
-        parts.append(dash + boundary_bytes + crlf)
-        parts.append(b'Content-Disposition: form-data; name="data"' + crlf)
-        parts.append(b"Content-Type: application/json;charset=UTF-8" + crlf)
-        parts.append(crlf)
-        parts.append(json.dumps(data, ensure_ascii=False).encode("utf-8"))
-        parts.append(crlf)
-
-        # Part 2: Dateiinhalt, referenziert ueber die cid.
         cid_bytes = cid.encode("ascii")
-        filename_header = filename.replace('"', "")
-        parts.append(dash + boundary_bytes + crlf)
-        parts.append(
-            b'Content-Disposition: form-data; name="'
-            + cid_bytes
-            + b'"; filename="'
-            + filename_header.encode("utf-8")
-            + b'"'
-            + crlf
-        )
-        parts.append(b"Content-ID: " + cid_bytes + crlf)
-        parts.append(b"Content-Type: " + DOCX_MIME_TYPE.encode("ascii") + crlf)
-        parts.append(crlf)
-        parts.append(file_bytes)
-        parts.append(crlf)
+        filename_header = filename.replace('"', "").encode("utf-8")
 
-        # Abschlussgrenze.
-        parts.append(dash + boundary_bytes + dash + crlf)
+        parts = [
+            # Part 1: Metadaten als JSON.
+            (
+                [
+                    b'Content-Disposition: form-data; name="data"',
+                    b"Content-Type: application/json;charset=UTF-8",
+                ],
+                json.dumps(data, ensure_ascii=False).encode("utf-8"),
+            ),
+            # Part 2: Dateiinhalt, referenziert ueber die cid.
+            (
+                [
+                    b'Content-Disposition: form-data; name="'
+                    + cid_bytes
+                    + b'"; filename="'
+                    + filename_header
+                    + b'"',
+                    b"Content-ID: " + cid_bytes,
+                    b"Content-Type: " + DOCX_MIME_TYPE.encode("ascii"),
+                ],
+                file_bytes,
+            ),
+        ]
 
-        body = b"".join(parts)
+        boundary = uuid.uuid4().hex
+        body = encode_multipart(parts, boundary)
         content_type = f"multipart/form-data; boundary={boundary}"
         return body, content_type
 
@@ -398,7 +470,7 @@ class EnaioBackend:
         except (KeyError, IndexError, TypeError):
             return None
 
-    async def uploadDocument(self, reference, file_path, document_type, betreff, filename):
+    async def upload_document(self, reference, file_path, document_type, betreff, filename):
         """Laedt eine Datei als neues Dokument in den Vorgang hoch.
 
         Das Dokument wird als OSTPL_AA_DOKUMENT-Objekt unter dem ueber
@@ -413,31 +485,29 @@ class EnaioBackend:
         """
 
         # Elternobjekt (Vorgang) ermitteln; wirft 404, wenn nicht vorhanden.
-        parent_id, _ = await self.getAktenzeichen(reference)
+        parent_id, _ = await self.get_aktenzeichen(reference)
 
         file_bytes = Path(file_path).read_bytes()
         body, content_type = self._build_upload_payload(
             parent_id, file_bytes, betreff, filename
         )
 
-        try:
-            self.logger.debug(
-                f"Lade Dokument ({document_type}) in Vorgang {reference} "
-                f"(Parent {parent_id}) hoch"
-            )
-            response = await self.session.post(
-                self.backendUrl + "/api/dms/objects?minimalResponse=true",
-                content=body,
-                headers={
-                    "accept": "application/json",
-                    "Content-Type": content_type,
-                },
-            )
-        except httpx.RequestError as e:
-            self.logger.error("Verbindungsfehler zur ENAIO API beim Upload in Vorgang %s: %s", reference, e)
-            raise HTTPException(
-                status_code=503, detail=f"Error connecting to ENAIO API: {e}"
-            )
+        self.logger.debug(
+            "Lade Dokument (%s) in Vorgang %s (Parent %s) hoch",
+            document_type, reference, parent_id,
+        )
+        # Statuscodes werden unten selbst ausgewertet, da 422 fachlich bedeutsam ist.
+        response = await self._request(
+            "POST",
+            "/api/dms/objects?minimalResponse=true",
+            context=f"Upload in Vorgang {reference}",
+            raise_for_status=False,
+            content=body,
+            headers={
+                "accept": "application/json",
+                "Content-Type": content_type,
+            },
+        )
 
         # Laut Spezifikation signalisiert 422 fehlgeschlagene Inserts.
         if response.status_code == 422:
@@ -464,7 +534,7 @@ class EnaioBackend:
         object_id = self._extract_object_id(data)
 
         self.logger.info(
-            f"Dokument in Vorgang {reference} hochgeladen (ObjectId {object_id})"
+            "Dokument in Vorgang %s hochgeladen (ObjectId %s)", reference, object_id
         )
 
         return {"objectId": object_id, "reference_nr": reference}
