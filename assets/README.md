@@ -39,9 +39,10 @@ in `vorlage.py` dokumentiert.
 
 Nach dem lokalen Erzeugen lädt `create_case_document` das Dokument über den
 Enaio-Endpunkt `POST /api/dms/objects` in den zugehörigen Vorgang (Aktenzeichen)
-hoch (Objekttyp `OSTPL_AA_DOKUMENT`). Das lokal erzeugte Dokument bleibt als
-Fallback erhalten; die Antwort enthält `stored_in_enaio: true` und die
-`enaio_object_id`.
+hoch (Objekttyp `OSTPL_AA_DOKUMENT`). Nach erfolgreichem Upload wird die lokal
+erzeugte Datei wieder gelöscht; die Antwort enthält `stored_in_enaio: true` und
+die `enaio_object_id`. Scheitert der Upload (oder greift das Rate-Limit), bleibt
+die Datei im Ausgabeverzeichnis (`OUTPUT_DIR`) liegen.
 
 Ein RateLimiter begrenzt die Uploads auf eine konfigurierbare Anzahl pro Minute:
 

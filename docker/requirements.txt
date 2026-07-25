@@ -1,5 +1,3 @@
 fastmcp
 fastapi
-requests
 httpx
-urllib3

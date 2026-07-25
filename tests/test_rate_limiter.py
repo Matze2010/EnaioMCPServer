@@ -1,11 +1,6 @@
 """Tests fuer den prozessinternen RateLimiter (rate_limiter.py)."""
 
-import os
-import sys
-
 import pytest
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import rate_limiter
 from rate_limiter import RateLimiter, RateLimitExceeded
