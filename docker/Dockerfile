@@ -23,4 +23,4 @@ COPY assets/ server/assets
 EXPOSE 8000
 
 # Command to run the server using the refactored entry point
-CMD ["fastmcp", "run", "server/EnaioMCP.py", "--host", "0.0.0.0", "--transport", "http", "--log-level", "DEBUG"]
+CMD ["fastmcp", "run", "server/EnaioMCP.py", "--host", "0.0.0.0", "--transport", "http", "--log-level", "INFO"]

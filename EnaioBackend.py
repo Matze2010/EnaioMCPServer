@@ -96,7 +96,7 @@ class EnaioBackend:
         }
 
         try:
-            self.logger.info(f"Getting Aktenzeichen {aktenzeichen}")
+            self.logger.debug(f"Getting Aktenzeichen {aktenzeichen}")
             response = await self.session.post(
                 self.backendUrl + "/api/dms/objects/search",
                 json=folder_query_params,
@@ -106,16 +106,19 @@ class EnaioBackend:
             data = response.json()
 
         except requests.exceptions.RequestException as e:
+            self.logger.error("Verbindungsfehler zur ENAIO API bei Aktenzeichen %s: %s", aktenzeichen, e)
             raise HTTPException(
                 status_code=503, detail=f"Error connecting to ENAIO API: {e}"
             )
         except Exception as e:
             # Catch other potential errors during processing
+            self.logger.exception("Interner Fehler beim Abruf von Aktenzeichen %s", aktenzeichen)
             raise HTTPException(
                 status_code=500, detail=f"An internal error occurred: {e}"
             )
 
         if len(data["objects"]) == 0:
+            self.logger.warning("Aktenzeichen '%s' nicht gefunden", aktenzeichen)
             raise HTTPException(
                 status_code=404, detail=f"Aktenzeichen '{aktenzeichen}' not found"
             )
@@ -154,7 +157,7 @@ class EnaioBackend:
             }
 
             try:
-                self.logger.info(
+                self.logger.debug(
                     f"Getting documentlist({docType}) of ParentObjectId {parentObjectId}"
                 )
                 response = await self.session.post(
@@ -166,17 +169,24 @@ class EnaioBackend:
                 data = response.json()
 
             except requests.exceptions.RequestException as e:
+                self.logger.error(
+                    "Verbindungsfehler zur ENAIO API beim Laden der Dokumentliste (%s) zu %s: %s",
+                    docType, parentObjectId, e,
+                )
                 raise HTTPException(
                     status_code=503, detail=f"Error connecting to ENAIO API: {e}"
                 )
             except Exception as e:
                 # Catch other potential errors during processing
+                self.logger.exception(
+                    "Interner Fehler beim Laden der Dokumentliste (%s) zu %s", docType, parentObjectId
+                )
                 raise HTTPException(
                     status_code=500, detail=f"An internal error occurred: {e}"
                 )
 
             if len(data["objects"]) == 0:
-                self.logger.info(
+                self.logger.debug(
                     f"No children of type {docType} for ParentObjectId {parentObjectId}"
                 )
                 continue
@@ -203,6 +213,9 @@ class EnaioBackend:
                 "Children for ParentObjectId %s: %s", parentObjectId, children
             )
 
+        self.logger.info(
+            "Dokumentliste zu Vorgang %s: %d Dokument(e)", parentObjectId, len(documents)
+        )
         return documents
 
     async def getDocument(self, documentId, format):
@@ -224,7 +237,7 @@ class EnaioBackend:
         }
 
         try:
-            self.logger.info(f"Getting document {documentId}")
+            self.logger.debug(f"Getting document {documentId}")
             response = await self.session.post(
                 self.backendUrl + "/api/dms/objects/search",
                 json=union_query_params,
@@ -234,16 +247,19 @@ class EnaioBackend:
             data = response.json()
 
         except requests.exceptions.RequestException as e:
+            self.logger.error("Verbindungsfehler zur ENAIO API bei Dokument %s: %s", documentId, e)
             raise HTTPException(
                 status_code=503, detail=f"Error connecting to ENAIO API: {e}"
             )
         except Exception as e:
             # Catch other potential errors during processing
+            self.logger.exception("Interner Fehler beim Abruf von Dokument %s", documentId)
             raise HTTPException(
                 status_code=500, detail=f"An internal error occurred: {e}"
             )
 
         if len(data["objects"]) == 0:
+            self.logger.warning("Dokument '%s' nicht gefunden", documentId)
             raise HTTPException(
                 status_code=404, detail=f"Document '{documentId}' not found"
             )
@@ -270,7 +286,9 @@ class EnaioBackend:
             else:
                 document["content"] = await self.getRendition(objectId)
 
-        self.logger.info("Content: %s", document)
+        # Bewusst OHNE document["content"] loggen: der Inhalt kann Volltext
+        # oder Binaerdaten (potenziell personenbezogen) enthalten.
+        self.logger.info("Dokument %s geladen (Typ %s)", documentId, document["type"])
 
         return (document, child)
 
@@ -403,7 +421,7 @@ class EnaioBackend:
         )
 
         try:
-            self.logger.info(
+            self.logger.debug(
                 f"Lade Dokument ({document_type}) in Vorgang {reference} "
                 f"(Parent {parent_id}) hoch"
             )
@@ -416,12 +434,14 @@ class EnaioBackend:
                 },
             )
         except httpx.RequestError as e:
+            self.logger.error("Verbindungsfehler zur ENAIO API beim Upload in Vorgang %s: %s", reference, e)
             raise HTTPException(
                 status_code=503, detail=f"Error connecting to ENAIO API: {e}"
             )
 
         # Laut Spezifikation signalisiert 422 fehlgeschlagene Inserts.
         if response.status_code == 422:
+            self.logger.warning("ENAIO hat den Upload abgelehnt (422) fuer Vorgang %s", reference)
             raise HTTPException(
                 status_code=422,
                 detail=f"Enaio hat den Upload abgelehnt (422): {response.text}",
@@ -430,6 +450,7 @@ class EnaioBackend:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
+            self.logger.error("Unerwartete Antwort der ENAIO API beim Upload in Vorgang %s: %s", reference, e)
             raise HTTPException(
                 status_code=502,
                 detail=f"Unerwartete Antwort der ENAIO API: {e}",
