@@ -4,6 +4,7 @@ import base64
 
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
 
 from fastmcp import FastMCP, Context
 from fastmcp.tools.tool import ToolAnnotations
@@ -29,6 +30,8 @@ from middleware import (
         enaio_placeholder_fields,
         get_enaio_headers,
 )
+
+load_dotenv()
 
 # Logging prozessweit konfigurieren (Level ueber LOG_LEVEL, Default INFO).
 # Auf Modulebene, damit sowohl "fastmcp run ..." als auch "python EnaioMCP.py"
