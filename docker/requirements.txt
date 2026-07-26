@@ -3,3 +3,4 @@
 fastmcp>=3,<4
 fastapi
 httpx
+dotenv
