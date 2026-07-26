@@ -1,4 +1,4 @@
-"""Tests fuer das Header-Logging bei Tool-Aufrufen."""
+"""Tests fuer das Header-Logging bei Tool-Aufrufen und Resource-Zugriffen."""
 
 import logging
 from types import SimpleNamespace
@@ -12,6 +12,11 @@ import request_logging
 def _context(tool_name="get_case_metadata"):
     """Minimaler Ersatz fuer den MiddlewareContext (nur ``message.name`` wird genutzt)."""
     return SimpleNamespace(message=SimpleNamespace(name=tool_name))
+
+
+def _resource_context(uri="document://132887/fulltext"):
+    """Wie ``_context``, aber fuer Resource-Zugriffe (``message.uri``)."""
+    return SimpleNamespace(message=SimpleNamespace(uri=uri))
 
 
 def test_format_headers_sorted_and_plaintext():
@@ -66,7 +71,42 @@ async def test_on_call_tool_logs_headers_and_passes_through(monkeypatch, caplog)
     )
 
 
-async def test_on_call_tool_requests_all_headers(monkeypatch):
+async def test_on_read_resource_logs_headers_and_passes_through(monkeypatch, caplog):
+    sentinel = object()
+    seen = []
+
+    async def call_next(context):
+        seen.append(context)
+        return sentinel
+
+    monkeypatch.setattr(
+        request_logging,
+        "get_http_headers",
+        lambda include_all=False: {"authorization": "Bearer test123", "x-test": "abc"},
+    )
+
+    context = _resource_context()
+    middleware = request_logging.RequestHeaderLoggingMiddleware()
+    with caplog.at_level(logging.INFO, logger="EnaioMCP"):
+        result = await middleware.on_read_resource(context, call_next)
+
+    assert result is sentinel
+    assert seen == [context]
+
+    records = [r for r in caplog.records if r.name == "EnaioMCP"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+    assert records[0].getMessage() == (
+        "Resource-Zugriff document://132887/fulltext - HTTP-Headers: "
+        "authorization=Bearer test123, x-test=abc"
+    )
+
+
+@pytest.mark.parametrize(
+    ("hook", "make_context"),
+    [("on_call_tool", _context), ("on_read_resource", _resource_context)],
+)
+async def test_hooks_request_all_headers(monkeypatch, hook, make_context):
     """Ohne ``include_all`` wuerden u. a. host und authorization fehlen."""
 
     calls = []
@@ -80,9 +120,8 @@ async def test_on_call_tool_requests_all_headers(monkeypatch):
 
     monkeypatch.setattr(request_logging, "get_http_headers", fake_get_http_headers)
 
-    await request_logging.RequestHeaderLoggingMiddleware().on_call_tool(
-        _context(), call_next
-    )
+    middleware = request_logging.RequestHeaderLoggingMiddleware()
+    await getattr(middleware, hook)(make_context(), call_next)
 
     assert calls == [True]
 
