@@ -13,6 +13,11 @@ Enaio-REST-API (`/api/dms/...`) per Basic Auth an.
 
 ### Tools
 
+Alle Tools verlangen den Parameter `SessionID`. Fehlt dieser Wert, antwortet
+der Server mit dem Hinweis, dass eine Enaio SessionID Voraussetzung fuer die
+Nutzung des Tools ist. Die `SessionID` wird nur als Pflichtnachweis geprueft;
+die Enaio-REST-API wird weiterhin ueber die konfigurierte Basic Auth angesprochen.
+
 | Tool | Zweck |
 |------|-------|
 | `get_case_metadata` | Metadaten und Dokumentliste zu einem Aktenzeichen; liefert zusätzlich `dms_link` zum Öffnen im Web-Client |

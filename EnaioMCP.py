@@ -16,7 +16,9 @@ from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
 from middleware import (
         EnaioHeaderMiddleware,
+        EnaioSessionIDMiddleware,
         RequestHeaderLoggingMiddleware,
+        SESSION_ID_DESCRIPTION,
         enaio_placeholder_fields,
         get_enaio_headers,
 )
@@ -236,7 +238,9 @@ mcp = FastMCP(
         "Enaio MCP Server",
         instructions=(
                 "Dieser Server gibt Zugriff auf Vorgänge (Akten) und deren Dokumente im "
-                "Dokumenten-Management-System Enaio. Ein Vorgang wird über sein Aktenzeichen "
+                "Dokumenten-Management-System Enaio. Alle Tools setzen voraus, dass der "
+                "Caller den Parameter SessionID mit einer Enaio SessionID uebergibt. "
+                "Ein Vorgang wird über sein Aktenzeichen "
                 "identifiziert, z. B. 'DS.1.2-2024-1234'. Wird ein Vorgang, eine Akte, ein Fall "
                 "oder ein Aktenzeichen erwähnt, ist get_case_metadata das passende Tool. "
                 "Dokumente werden über ihre Dokument-ID referenziert, die man aus dem "
@@ -261,6 +265,9 @@ mcp = FastMCP(
 # Resources ueber get_enaio_headers(ctx) als Dict zur Verfuegung.
 mcp.add_middleware(EnaioHeaderMiddleware())
 
+# Erzwingt fuer jeden Tool-Aufruf eine nicht-leere Enaio SessionID.
+mcp.add_middleware(EnaioSessionIDMiddleware())
+
 # Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
 # mcp.add_middleware(RequestHeaderLoggingMiddleware())
 
@@ -280,6 +287,7 @@ async def get_case_metadata(
                 "Aktenzeichen des Vorgangs, z. B. 'DS.1.2-2024-1234' "
                 "(Format: DS.<Zahl>.<Zahl>-<Jahr>-<laufende Nummer>).",
         ],
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
 ) -> dict:
         """
@@ -298,6 +306,7 @@ async def get_case_metadata(
         mit angegeben werden.
 
         :param reference: Aktenzeichen des Vorgangs (Pflichtformat siehe oben).
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
@@ -329,6 +338,7 @@ async def list_running_cases(
                 "Benutzerkürzel des Aktenverantwortlichen, z. B. 'gisch'. "
                 "Groß-/Kleinschreibung spielt keine Rolle.",
         ],
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
 ) -> dict:
         """
@@ -348,6 +358,7 @@ async def list_running_cases(
         werden.
 
         :param user: Benutzerkürzel des Aktenverantwortlichen.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         await ctx.info(f"Suche laufende Vorgänge von {user} in ENAIO")
@@ -411,6 +422,7 @@ async def create_case_document(
                         '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
                 ),
         ],
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
         betreff: Annotated[
                 Optional[str],
@@ -625,6 +637,7 @@ async def create_case_document(
         :param reference: Aktenzeichen / Vorgangsnummer.
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
         :param content: Liste von Inhaltsblöcken.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         :param betreff: Optionaler Betreff.
         :param fields: Optionale Zuordnung Platzhaltername -> Ersatztext; [Datum] immer
                 aktuelles Datum, [Aktenzeichen] fällt auf reference zurück, [Mail], [Name]
@@ -694,6 +707,7 @@ async def create_case_document(
 )
 async def access_document_fulltext(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
 ) -> str:
         """
@@ -705,6 +719,7 @@ async def access_document_fulltext(
         (z. B. als Anhang oder zum Download) benötigt wird, nutze download_document.
 
         :param document: Dokument-ID.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         return await _load_document_content(document, "text", ctx)
@@ -721,6 +736,7 @@ async def access_document_fulltext(
 )
 async def download_document(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
 ) -> str:
         """
@@ -731,6 +747,7 @@ async def download_document(
         selbst benötigt wird, nicht nur ihr Textinhalt.
 
         :param document: Dokument-ID.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         content = await _load_document_content(document, "file", ctx)

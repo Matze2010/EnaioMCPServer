@@ -49,6 +49,7 @@ async def test_create_case_document_returns_edit_link(stubbed_document):
         "DS.1.2-2024-1234",
         "Vermerk",
         [{"type": "para", "text": "Inhalt"}],
+        "SESSION-1",
         _Ctx(),
     )
 
@@ -67,6 +68,7 @@ async def test_create_case_document_without_link_when_object_id_missing(stubbed_
         "DS.1.2-2024-1234",
         "Vermerk",
         [{"type": "para", "text": "Inhalt"}],
+        "SESSION-1",
         _Ctx(),
     )
 
@@ -111,3 +113,4 @@ async def test_server_instructions_mention_the_save_rule():
 
     assert "create_case_document" in instructions
     assert "Speicheranweisung" in instructions
+    assert "SessionID" in instructions
