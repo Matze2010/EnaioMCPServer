@@ -71,3 +71,42 @@ async def test_create_case_document_without_link_when_object_id_missing(stubbed_
 
     assert result["enaio_object_id"] is None
     assert "edit_link" not in result
+
+
+async def test_guardrail_reaches_the_client():
+    # FastMCP schneidet den Docstring am :param-Block ab. Stand die Aufrufregel dahinter,
+    # kam sie beim Modell nie an - deshalb hier gegen die tatsaechlich ausgelieferte
+    # Tool-Beschreibung pruefen, nicht gegen __doc__.
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    description = tool.description
+
+    for marker in (
+        "KERNREGEL",
+        "ZULÄSSIGKEITSPRÜFUNG",
+        "WAS ALS AUSDRÜCKLICHE SPEICHERANWEISUNG GILT",
+        "WAS AUSDRÜCKLICH KEINE SPEICHERANWEISUNG IST",
+        "VERBOT IMPLIZITER ANNAHMEN",
+        "FAIL-CLOSED-REGEL",
+        "MERKSATZ",
+    ):
+        assert marker in description
+
+    # Der Merksatz muss der Schluss der Beschreibung bleiben (Recency), der :param-Block
+    # wird von FastMCP entfernt.
+    assert description.rstrip().endswith("in Enaio zu speichern.")
+    assert ":param" not in description
+
+
+async def test_create_case_document_is_marked_destructive():
+    # Clients, die auf destructiveHint reagieren, sollen vor dem Speichern nachfragen.
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.readOnlyHint is False
+
+
+async def test_server_instructions_mention_the_save_rule():
+    instructions = EnaioMCP.mcp.instructions
+
+    assert "create_case_document" in instructions
+    assert "Speicheranweisung" in instructions
