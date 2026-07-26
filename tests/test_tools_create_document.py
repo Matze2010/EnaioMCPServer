@@ -114,3 +114,4 @@ async def test_server_instructions_mention_the_save_rule():
     assert "create_case_document" in instructions
     assert "Speicheranweisung" in instructions
     assert "SessionID" in instructions
+    assert "Resources" in instructions

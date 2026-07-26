@@ -13,9 +13,9 @@ Enaio-REST-API (`/api/dms/...`) per Basic Auth an.
 
 ### Tools
 
-Alle Tools verlangen den Parameter `SessionID`. Fehlt dieser Wert, antwortet
+Alle Tools und Resources verlangen den Parameter `SessionID`. Fehlt dieser Wert, antwortet
 der Server mit dem Hinweis, dass eine Enaio SessionID Voraussetzung fuer die
-Nutzung des Tools ist. Die `SessionID` wird nur als Pflichtnachweis geprueft;
+Nutzung des Aufrufs ist. Die `SessionID` wird nur als Pflichtnachweis geprueft;
 die Enaio-REST-API wird weiterhin ueber die konfigurierte Basic Auth angesprochen.
 
 | Tool | Zweck |
@@ -36,8 +36,8 @@ wenn ein Entwurf fertig ist oder abgenommen wurde.
 
 | URI | Inhalt |
 |-----|--------|
-| `document://{document}/fulltext` | Volltext des Dokuments (Text) |
-| `document://{document}/file` | Originaldatei des Dokuments (binär) |
+| `document://{SessionID}/{document}/fulltext` | Volltext des Dokuments (Text) |
+| `document://{SessionID}/{document}/file` | Originaldatei des Dokuments (binär) |
 
 ## Konfiguration
 
