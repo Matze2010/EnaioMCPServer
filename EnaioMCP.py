@@ -39,9 +39,11 @@ backend.set_auth(username, password)
 DMS_WEB_URL = os.environ.get('DMS_WEB_URL', url)
 
 # Basis-URL des Enaio-Office-Editors fuer Links, mit denen ein erzeugtes
-# Word-Dokument direkt zur Bearbeitung geoeffnet werden kann. Bewusst fest
-# hinterlegt und nicht ueber die Umgebung konfigurierbar.
-OFFICE_WEB_URL = "https://enaio.lfdi.local"
+# Word-Dokument direkt zur Bearbeitung geoeffnet werden kann. Ueber die
+# Umgebungsvariable OFFICE_WEB_URL konfigurierbar. Ohne eigene Konfiguration
+# wird die API-Basis-URL verwendet, da Office-Editor und REST-API in der Regel
+# auf demselben Host liegen.
+OFFICE_WEB_URL = os.environ.get('OFFICE_WEB_URL', url)
 
 
 # Verzeichnis mit den .docx-Hausvorlagen sowie Ausgabeverzeichnis fuer die
@@ -102,7 +104,7 @@ def _office_edit_link(object_id) -> Optional[str]:
         """
 
         base = (OFFICE_WEB_URL or "").rstrip("/")
-        if not object_id or not base:
+        if not object_id or not base or base == "DEFAULT_URL":
                 return None
 
         return f"{base}/office/desktop/edit/edit/{UPLOAD_OBJECT_TYPE_ID}/{object_id}"

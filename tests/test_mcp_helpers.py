@@ -185,11 +185,13 @@ def test_dms_link_returns_none_without_usable_input(monkeypatch, base, object_id
     assert EnaioMCP._dms_link(object_id) is None
 
 
-def test_office_edit_link_uses_example_format():
+def test_office_edit_link_uses_example_format(monkeypatch):
     # Objekttyp-ID der Vorgangsdokumente steckt fest im Link.
+    monkeypatch.setattr(EnaioMCP, "OFFICE_WEB_URL", "https://enaio.test")
+
     assert (
         EnaioMCP._office_edit_link("305821")
-        == "https://enaio.lfdi.local/office/desktop/edit/edit/262146/305821"
+        == "https://enaio.test/office/desktop/edit/edit/262146/305821"
     )
 
 
@@ -209,6 +211,8 @@ def test_office_edit_link_strips_trailing_slash(monkeypatch):
         ("https://enaio.test", ""),
         ("", "305821"),
         (None, "305821"),
+        # Platzhalter aus dem Default, wenn keine URL konfiguriert ist.
+        ("DEFAULT_URL", "305821"),
     ],
 )
 def test_office_edit_link_returns_none_without_usable_input(monkeypatch, base, object_id):

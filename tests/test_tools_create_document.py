@@ -22,6 +22,7 @@ def stubbed_document(monkeypatch, tmp_path):
 
     monkeypatch.setattr(EnaioMCP, "ASSETS_DIR", tmp_path)
     monkeypatch.setattr(EnaioMCP, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(EnaioMCP, "OFFICE_WEB_URL", "https://enaio.test")
     monkeypatch.setattr(EnaioMCP, "upload_limiter", RateLimiter(10))
     (tmp_path / "Vorlage_Vermerk.docx").write_bytes(b"PK")
 
@@ -54,7 +55,7 @@ async def test_create_case_document_returns_edit_link(stubbed_document):
     assert result["enaio_object_id"] == "305821"
     assert (
         result["edit_link"]
-        == "https://enaio.lfdi.local/office/desktop/edit/edit/262146/305821"
+        == "https://enaio.test/office/desktop/edit/edit/262146/305821"
     )
 
 
