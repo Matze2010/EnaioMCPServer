@@ -108,6 +108,22 @@ async def test_guardrail_reaches_the_client():
     assert ":param" not in description
 
 
+async def test_fields_annotation_mentions_common_placeholders():
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    description = tool.parameters["properties"]["fields"]["description"]
+
+    for placeholder in (
+        "Adressat",
+        "PLZ",
+        "Ort",
+        "Ansprechpartner",
+        "Abteilung",
+        "Anschrift",
+    ):
+        assert placeholder in description
+        assert f"[{placeholder}]" in description
+
+
 async def test_create_case_document_is_marked_destructive():
     # Clients, die auf destructiveHint reagieren, sollen vor dem Speichern nachfragen.
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
