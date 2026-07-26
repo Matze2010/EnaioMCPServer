@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import logging_config
-import request_logging
+from middleware import request_logging
 
 
 def _context(tool_name="get_case_metadata"):

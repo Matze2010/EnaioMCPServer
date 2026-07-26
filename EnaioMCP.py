@@ -14,7 +14,12 @@ import vorlage
 from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
-from request_logging import RequestHeaderLoggingMiddleware
+from middleware import (
+        EnaioHeaderMiddleware,
+        RequestHeaderLoggingMiddleware,
+        enaio_placeholder_fields,
+        get_enaio_headers,
+)
 
 # Logging prozessweit konfigurieren (Level ueber LOG_LEVEL, Default INFO).
 # Auf Modulebene, damit sowohl "fastmcp run ..." als auch "python EnaioMCP.py"
@@ -128,6 +133,30 @@ def _output_path(document_type: str, betreff: Optional[str]):
         return OUTPUT_DIR / out_name, out_name
 
 
+async def _document_fields(reference: str, fields: Optional[dict], ctx: Context) -> dict:
+        """Stellt die Platzhalterwerte fuer die Vorlage zusammen.
+
+        Basis sind die uebergebenen ``fields``. Ergaenzt werden das Aktenzeichen
+        aus ``reference`` sowie die Angaben zum aufrufenden Benutzer aus den
+        x-enaio-Headern ([Mail], [Name], [Username], ...). Beides nur per
+        ``setdefault``: ein ausdruecklich uebergebener Wert bleibt stehen.
+
+        :param reference: Aktenzeichen des Vorgangs.
+        :param fields: Optional uebergebene Platzhalterwerte.
+        :param ctx: Context des Aufrufs (liefert die x-enaio-Header).
+        :returns: Zuordnung Platzhaltername -> Ersatztext.
+        """
+
+        doc_fields = dict(fields or {})
+        doc_fields.setdefault("Aktenzeichen", reference)
+
+        enaio = await get_enaio_headers(ctx)
+        for key, value in enaio_placeholder_fields(enaio).items():
+                doc_fields.setdefault(key, value)
+
+        return doc_fields
+
+
 def _render_document(template_path, content, out_path, betreff, fields):
         """Fuellt die Vorlage und meldet Vorlagenfehler als HTTP 422."""
 
@@ -193,6 +222,10 @@ mcp = FastMCP(
                 "list_running_cases das passende Tool."
         ),
 )
+
+# Stellt die x-enaio-Header des eingehenden HTTP-Requests allen Tools und
+# Resources ueber get_enaio_headers(ctx) als Dict zur Verfuegung.
+mcp.add_middleware(EnaioHeaderMiddleware())
 
 # Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
 mcp.add_middleware(RequestHeaderLoggingMiddleware())
@@ -354,8 +387,10 @@ async def create_case_document(
                         "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\",\"Bearbeiter\":\"Max Mustermann\"}. "
                         "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
                         "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
-                        "angegeben - aus 'reference' uebernommen. Nicht angegebene Platzhalter bleiben "
-                        "unveraendert im Dokument."
+                        "angegeben - aus 'reference' uebernommen. Die Angaben zum aufrufenden Benutzer "
+                        "([Mail], [Name], [Username]) werden - sofern nicht angegeben - automatisch aus "
+                        "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
+                        "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
                 ),
         ] = None,
 ) -> dict:
@@ -379,7 +414,8 @@ async def create_case_document(
         :param content: Liste von Inhaltsbloecken.
         :param betreff: Optionaler Betreff.
         :param fields: Optionale Zuordnung Platzhaltername -> Ersatztext; [Datum] immer
-                aktuelles Datum, [Aktenzeichen] faellt auf reference zurueck.
+                aktuelles Datum, [Aktenzeichen] faellt auf reference zurueck, [Mail], [Name]
+                und [Username] auf die x-enaio-Header des Aufrufs.
         """
 
         template_name, template_path = _resolve_template(document_type)
@@ -391,10 +427,10 @@ async def create_case_document(
 
         out_path, out_name = _output_path(document_type, betreff)
 
-        # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck, wenn nicht
+        # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck und die
+        # Benutzerangaben ([Mail], [Name], ...) auf die x-enaio-Header, jeweils nur wenn nicht
         # ausdruecklich angegeben. [Datum] setzt fill_document stets auf das aktuelle Datum.
-        doc_fields = dict(fields or {})
-        doc_fields.setdefault("Aktenzeichen", reference)
+        doc_fields = await _document_fields(reference, fields, ctx)
 
         written = _render_document(template_path, content, out_path, betreff, doc_fields)
 

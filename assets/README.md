@@ -32,8 +32,30 @@ Logo, Kopf- und Fußzeile erhalten bleiben:
   der Platzhalter entfernt. Die Ersetzung funktioniert auch, wenn Word den
   Platzhalter intern über mehrere Textläufe aufgeteilt hat.
 
+- Weitere Platzhalter in eckigen Klammern (z. B. `[Aktenzeichen]`, `[Datum]`)
+  werden über den Parameter `fields` befüllt; nicht übergebene Platzhalter
+  bleiben unverändert stehen.
+
 Die unterstützten Inhaltsblöcke (heading, subheading, para, listitem, table) sind
 in `vorlage.py` dokumentiert.
+
+## Automatisch befüllte Platzhalter zum Benutzer
+
+Die Identität des Aufrufers kommt über HTTP-Header vom Typ `x-enaio-*` herein
+(siehe `middleware/enaio_headers.py`). Jeder dieser Header steht in der Vorlage
+als Platzhalter zur Verfügung — der Feldname hinter dem Präfix, mit großem
+Anfangsbuchstaben:
+
+| HTTP-Header        | Platzhalter  |
+|--------------------|--------------|
+| `x-enaio-mail`     | `[Mail]`     |
+| `x-enaio-name`     | `[Name]`     |
+| `x-enaio-username` | `[Username]` |
+
+Ein künftiger Header `x-enaio-<feld>` steht ohne Code-Änderung als `[Feld]`
+bereit. Vorrang hat immer ein ausdrücklich in `fields` übergebener Wert; fehlt
+der Header (z. B. beim stdio-Transport), bleibt der Platzhalter unverändert im
+Dokument stehen.
 
 ## Enaio-Upload und Rate-Limit
 

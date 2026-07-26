@@ -1,3 +1,5 @@
-fastmcp
+# Ab 3.x ist die Context-State-API asynchron und kennt serializable=False
+# (request-scoped), was middleware/enaio_headers.py voraussetzt.
+fastmcp>=3,<4
 fastapi
 httpx
