@@ -123,6 +123,18 @@ async def test_fields_annotation_mentions_common_placeholders():
         assert placeholder in description
         assert f"[{placeholder}]" in description
 
+    for marker in (
+        "sämtliche bekannten Angaben",
+        "Name",
+        "Bearbeiter",
+        "Organisation",
+        "Postleitzahl",
+        "ausschließlich",
+        "nicht zu ergänzen",
+        "nicht zu fingieren",
+    ):
+        assert marker in description
+
 
 async def test_content_annotation_rejects_json_array_as_string():
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
