@@ -185,6 +185,38 @@ def test_dms_link_returns_none_without_usable_input(monkeypatch, base, object_id
     assert EnaioMCP._dms_link(object_id) is None
 
 
+def test_office_edit_link_uses_example_format():
+    # Objekttyp-ID der Vorgangsdokumente steckt fest im Link.
+    assert (
+        EnaioMCP._office_edit_link("305821")
+        == "https://enaio.lfdi.local/office/desktop/edit/edit/262146/305821"
+    )
+
+
+def test_office_edit_link_strips_trailing_slash(monkeypatch):
+    monkeypatch.setattr(EnaioMCP, "OFFICE_WEB_URL", "https://enaio.test/")
+
+    assert (
+        EnaioMCP._office_edit_link("42")
+        == "https://enaio.test/office/desktop/edit/edit/262146/42"
+    )
+
+
+@pytest.mark.parametrize(
+    "base, object_id",
+    [
+        ("https://enaio.test", None),
+        ("https://enaio.test", ""),
+        ("", "305821"),
+        (None, "305821"),
+    ],
+)
+def test_office_edit_link_returns_none_without_usable_input(monkeypatch, base, object_id):
+    monkeypatch.setattr(EnaioMCP, "OFFICE_WEB_URL", base)
+
+    assert EnaioMCP._office_edit_link(object_id) is None
+
+
 async def test_enforce_upload_rate_limit_maps_to_429(monkeypatch):
     from rate_limiter import RateLimiter
 

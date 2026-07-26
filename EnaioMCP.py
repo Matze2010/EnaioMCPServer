@@ -11,7 +11,7 @@ from typing import Annotated, List, Optional
 from fastapi import HTTPException
 
 import vorlage
-from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS
+from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS, UPLOAD_OBJECT_TYPE_ID
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
 from middleware import (
@@ -37,6 +37,11 @@ backend.set_auth(username, password)
 # Ohne eigene Konfiguration wird die API-Basis-URL verwendet, da Web-Client und
 # REST-API in der Regel auf demselben Host liegen.
 DMS_WEB_URL = os.environ.get('DMS_WEB_URL', url)
+
+# Basis-URL des Enaio-Office-Editors fuer Links, mit denen ein erzeugtes
+# Word-Dokument direkt zur Bearbeitung geoeffnet werden kann. Bewusst fest
+# hinterlegt und nicht ueber die Umgebung konfigurierbar.
+OFFICE_WEB_URL = "https://enaio.lfdi.local"
 
 
 # Verzeichnis mit den .docx-Hausvorlagen sowie Ausgabeverzeichnis fuer die
@@ -84,6 +89,23 @@ def _dms_link(object_id) -> Optional[str]:
                 f"{base}/osweb/#/folder/{object_id}/0"
                 f"?state={state}&currentId={object_id}&currentTypeId=0"
         )
+
+
+def _office_edit_link(object_id) -> Optional[str]:
+        """Baut den Link, ueber den ein Dokument im Enaio-Office-Editor bearbeitet wird.
+
+        Die Objekttyp-ID ist die der Vorgangsdokumente (UPLOAD_OBJECT_TYPE_ID), unter
+        der create_case_document neue Dokumente ablegt.
+
+        :param object_id: ObjectID des Dokuments (``system:objectId``).
+        :returns: Link oder ``None``, wenn ObjectID oder Basis-URL fehlen.
+        """
+
+        base = (OFFICE_WEB_URL or "").rstrip("/")
+        if not object_id or not base:
+                return None
+
+        return f"{base}/office/desktop/edit/edit/{UPLOAD_OBJECT_TYPE_ID}/{object_id}"
 
 
 def _resolve_template(document_type: str):
@@ -409,6 +431,10 @@ async def create_case_document(
         Minute; wird das Limit ueberschritten, wird der Upload mit HTTP 429
         abgelehnt (das lokal erzeugte Dokument bleibt erhalten).
 
+        Die Rueckgabe enthaelt mit "edit_link" einen direkten Link, mit dem das neu
+        erzeugte Word-Dokument sofort zur Bearbeitung geoeffnet werden kann; dieser
+        Link sollte in der Antwort mit angegeben werden.
+
         :param reference: Aktenzeichen / Vorgangsnummer.
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
         :param content: Liste von Inhaltsbloecken.
@@ -451,15 +477,23 @@ async def create_case_document(
 
         await _discard_temp_file(written, ctx)
 
-        return {
+        object_id = upload.get("objectId")
+        result = {
                 "reference_nr": reference,
                 "document_type": document_type,
                 "betreff": betreff,
                 "template": template_name,
                 "blocks": len(content),
                 "stored_in_enaio": True,
-                "enaio_object_id": upload.get("objectId"),
+                "enaio_object_id": object_id,
         }
+
+        # Link zum direkten Bearbeiten; faellt weg, wenn Enaio keine ObjectID liefert.
+        edit_link = _office_edit_link(object_id)
+        if edit_link:
+                result["edit_link"] = edit_link
+
+        return result
 
 
 @mcp.tool(
