@@ -27,8 +27,8 @@ async def make_backend():
 
     backends = []
 
-    def _make(handler):
-        backend = EnaioBackend(url="https://enaio.test")
+    def _make(handler, auth_mode="session"):
+        backend = EnaioBackend(url="https://enaio.test", auth_mode=auth_mode)
         backend.session = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         backends.append(backend)
         return backend

@@ -11,7 +11,14 @@ from typing import Annotated, List, Optional
 from fastapi import HTTPException
 
 import vorlage
-from EnaioBackend import EnaioBackend, RUNNING_CASE_STATUS, UPLOAD_OBJECT_TYPE_ID
+from EnaioBackend import (
+        AUTH_MODES,
+        AUTH_MODE_BASIC,
+        AUTH_MODE_SESSION,
+        EnaioBackend,
+        RUNNING_CASE_STATUS,
+        UPLOAD_OBJECT_TYPE_ID,
+)
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
 from middleware import (
@@ -31,9 +38,14 @@ configure_logging()
 url = os.environ.get('URL', 'DEFAULT_URL')
 username = os.environ.get('USERNAME', 'DEFAULT_USERNAME')
 password = os.environ.get('PASSWORD', 'DEFAULT_PASSWORD')
+AUTH_MODE = os.environ.get("AUTH_MODE", AUTH_MODE_SESSION).strip().lower()
+if AUTH_MODE not in AUTH_MODES:
+        allowed = ", ".join(sorted(AUTH_MODES))
+        raise RuntimeError(f"Ungueltiger AUTH_MODE '{AUTH_MODE}'. Erlaubt sind: {allowed}.")
 
-backend = EnaioBackend(url=url)
-backend.set_auth(username, password)
+backend = EnaioBackend(url=url, auth_mode=AUTH_MODE)
+if AUTH_MODE == AUTH_MODE_BASIC:
+        backend.set_auth(username, password)
 
 # Basis-URL des Enaio-Web-Clients (osweb) fuer anklickbare Links auf Vorgaenge.
 # Ohne eigene Konfiguration wird die API-Basis-URL verwendet, da Web-Client und
@@ -220,7 +232,9 @@ async def _discard_temp_file(path, ctx: Context):
                 await ctx.info(f"Warnung: temporaere Datei {path} konnte nicht geloescht werden: {e}")
 
 
-async def _load_document_content(document_id: str, content_format: str, ctx: Context):
+async def _load_document_content(
+        document_id: str, content_format: str, session_id: str, ctx: Context
+):
         """Laedt den Inhalt eines Dokuments in der gewuenschten Repraesentation.
 
         :param content_format: ``"file"`` fuer die Originaldatei (bytes), sonst
@@ -230,7 +244,7 @@ async def _load_document_content(document_id: str, content_format: str, ctx: Con
         what = "Datei" if content_format == "file" else "Textinhalt"
         await ctx.info(f"Lade {what} zum Dokument {document_id}")
 
-        document = await backend.get_document(document_id, content_format)
+        document = await backend.get_document(document_id, content_format, session_id=session_id)
         return document["content"]
 
 
@@ -310,10 +324,10 @@ async def get_case_metadata(
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
-        akte, record = await backend.get_aktenzeichen(reference)
+        akte, record = await backend.get_aktenzeichen(reference, session_id=SessionID)
 
         await ctx.info(f"Lade Liste aller Dokumente zum Vorgang {reference} ({akte})")
-        record["documents"] = await backend.get_document_list(akte)
+        record["documents"] = await backend.get_document_list(akte, session_id=SessionID)
 
         record["object_id"] = akte
         link = _dms_link(akte)
@@ -362,7 +376,7 @@ async def list_running_cases(
         """
 
         await ctx.info(f"Suche laufende Vorgänge von {user} in ENAIO")
-        cases = await backend.get_running_cases(user)
+        cases = await backend.get_running_cases(user, session_id=SessionID)
 
         for case in cases:
                 link = _dms_link(case.get("object_id"))
@@ -673,6 +687,7 @@ async def create_case_document(
                 document_type,
                 betreff,
                 out_name,
+                session_id=SessionID,
         )
 
         await _discard_temp_file(written, ctx)
@@ -722,7 +737,7 @@ async def access_document_fulltext(
         :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
-        return await _load_document_content(document, "text", ctx)
+        return await _load_document_content(document, "text", SessionID, ctx)
 
 
 @mcp.tool(
@@ -750,7 +765,7 @@ async def download_document(
         :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
-        content = await _load_document_content(document, "file", ctx)
+        content = await _load_document_content(document, "file", SessionID, ctx)
 
         return base64.b64encode(content).decode("ascii")
 
@@ -763,7 +778,7 @@ async def resource_access_document_fulltext(SessionID: str, document: str, ctx: 
         :param document: Dokument-ID
         """
 
-        return await _load_document_content(document, "text", ctx)
+        return await _load_document_content(document, "text", SessionID, ctx)
 
 
 @mcp.resource("document://{SessionID}/{document}/file")
@@ -774,7 +789,7 @@ async def resource_download_document(SessionID: str, document: str, ctx: Context
         :param document: Dokument-ID
         """
 
-        return await _load_document_content(document, "file", ctx)
+        return await _load_document_content(document, "file", SessionID, ctx)
 
 
 if __name__ == "__main__":

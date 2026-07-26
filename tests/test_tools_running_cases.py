@@ -21,8 +21,9 @@ async def test_list_running_cases_adds_dms_link(monkeypatch):
         {"reference_nr": "DS.1.2-2024-5678", "object_id": "132888"},
     ]
 
-    async def fake_get_running_cases(user):
+    async def fake_get_running_cases(user, session_id=None):
         assert user == "gisch"
+        assert session_id == "SESSION-1"
         return cases
 
     monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", "https://enaio.test")
@@ -40,7 +41,8 @@ async def test_list_running_cases_adds_dms_link(monkeypatch):
 
 
 async def test_list_running_cases_without_link_when_unconfigured(monkeypatch):
-    async def fake_get_running_cases(user):
+    async def fake_get_running_cases(user, session_id=None):
+        assert session_id == "SESSION-1"
         return [{"reference_nr": "DS.1.2-2024-1234", "object_id": "132887"}]
 
     # Ohne konfigurierte Basis-URL bleibt das Feld weg statt kaputt zu sein.

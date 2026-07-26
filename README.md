@@ -7,7 +7,8 @@ Aktenzeichen identifiziert (Format `DS.<Zahl>.<Zahl>-<Jahr>-<lfd. Nummer>`,
 z. B. `DS.1.2-2024-1234`).
 
 Der Server baut auf [FastMCP](https://gofastmcp.com/) auf und spricht die
-Enaio-REST-API (`/api/dms/...`) per Basic Auth an.
+Enaio-REST-API (`/api/dms/...`) wahlweise mit SessionID-Cookie oder Basic Auth
+an. Standard ist die SessionID-Authentifizierung.
 
 ## Funktionsumfang
 
@@ -15,8 +16,11 @@ Enaio-REST-API (`/api/dms/...`) per Basic Auth an.
 
 Alle Tools und Resources verlangen den Parameter `SessionID`. Fehlt dieser Wert, antwortet
 der Server mit dem Hinweis, dass eine Enaio SessionID Voraussetzung fuer die
-Nutzung des Aufrufs ist. Die `SessionID` wird nur als Pflichtnachweis geprueft;
-die Enaio-REST-API wird weiterhin ueber die konfigurierte Basic Auth angesprochen.
+Nutzung des Aufrufs ist. Im Standardmodus `AUTH_MODE=session` wird die
+`SessionID` bei jedem Enaio-API-Aufruf als Cookie `JSESSIONID` uebergeben.
+Schlaegt die Authentifizierung fehl, weist die Antwort darauf hin, den Aufruf
+mit einer aktuellen SessionID zu wiederholen. Fuer Bestandsumgebungen kann mit
+`AUTH_MODE=basic` weiterhin Basic Auth verwendet werden.
 
 | Tool | Zweck |
 |------|-------|
@@ -47,8 +51,9 @@ Konfigurationsdatei.
 | Variable | Standard | Bedeutung |
 |----------|----------|-----------|
 | `URL` | `DEFAULT_URL` (Platzhalter) | Basis-URL der Enaio-REST-API, z. B. `https://enaio.example`. Ohne diesen Wert schlägt jeder Enaio-Zugriff fehl. |
-| `USERNAME` | `DEFAULT_USERNAME` (Platzhalter) | Benutzername für die Basic-Auth-Anmeldung an der API |
-| `PASSWORD` | `DEFAULT_PASSWORD` (Platzhalter) | Zugehöriges Passwort |
+| `AUTH_MODE` | `session` | Backend-Authentifizierung: `session` sendet die Tool-`SessionID` als Cookie `JSESSIONID`; `basic` nutzt `USERNAME`/`PASSWORD`. Andere Werte verhindern den Start. |
+| `USERNAME` | `DEFAULT_USERNAME` (Platzhalter) | Benutzername für die Basic-Auth-Anmeldung an der API, nur bei `AUTH_MODE=basic` |
+| `PASSWORD` | `DEFAULT_PASSWORD` (Platzhalter) | Zugehöriges Passwort, nur bei `AUTH_MODE=basic` |
 | `DMS_WEB_URL` | Wert von `URL` | Basis-URL des Enaio-Web-Clients (osweb) für die `dms_link`-Links auf Vorgänge |
 | `OFFICE_WEB_URL` | Wert von `URL` | Basis-URL des Enaio-Office-Editors für die `edit_link`-Links auf neu erzeugte Dokumente |
 | `ASSETS_DIR` | `./assets` | Verzeichnis mit den `.docx`-Hausvorlagen |
@@ -81,6 +86,15 @@ pip install -r docker/requirements.txt
 
 ```bash
 export URL=https://enaio.example
+export AUTH_MODE=session
+python EnaioMCP.py
+```
+
+Mit Basic Auth als Fallback:
+
+```bash
+export URL=https://enaio.example
+export AUTH_MODE=basic
 export USERNAME=... PASSWORD=...
 python EnaioMCP.py
 ```
@@ -109,6 +123,17 @@ docker build -f docker/Dockerfile -t enaio-mcp build
 ```bash
 docker run -p 8000:8000 \
   -e URL=https://enaio.example \
+  -e AUTH_MODE=session \
+  -e OFFICE_WEB_URL=https://office.example \
+  enaio-mcp
+```
+
+Mit Basic Auth:
+
+```bash
+docker run -p 8000:8000 \
+  -e URL=https://enaio.example \
+  -e AUTH_MODE=basic \
   -e USERNAME=... \
   -e PASSWORD=... \
   -e OFFICE_WEB_URL=https://office.example \

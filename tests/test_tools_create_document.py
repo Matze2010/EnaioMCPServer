@@ -34,7 +34,15 @@ def stubbed_document(monkeypatch, tmp_path):
     monkeypatch.setattr(EnaioMCP, "_render_document", fake_render)
 
     def set_object_id(object_id):
-        async def fake_upload(reference, file_path, document_type, betreff, filename):
+        async def fake_upload(
+            reference,
+            file_path,
+            document_type,
+            betreff,
+            filename,
+            session_id=None,
+        ):
+            assert session_id == "SESSION-1"
             return {"objectId": object_id, "reference_nr": reference}
 
         monkeypatch.setattr(EnaioMCP.backend, "upload_document", fake_upload)

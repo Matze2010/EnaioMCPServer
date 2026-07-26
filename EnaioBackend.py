@@ -28,6 +28,13 @@ DEFAULT_SEARCH_OPTIONS = {"Rights": 0, "RegisterContext": 0}
 RUNNING_CASE_STATUS = "laufend"
 
 SEARCH_PATH = "/api/dms/objects/search"
+AUTH_MODE_BASIC = "basic"
+AUTH_MODE_SESSION = "session"
+AUTH_MODES = {AUTH_MODE_BASIC, AUTH_MODE_SESSION}
+SESSION_AUTH_FAILED_MESSAGE = (
+    "Die Authentifizierung an der Enaio-API ist fehlgeschlagen. "
+    "Bitte wiederholen Sie den Aufruf mit einer aktuellen SessionID."
+)
 
 
 class ObjectType(NamedTuple):
@@ -108,22 +115,59 @@ def encode_multipart(parts, boundary: str) -> bytes:
 
 class EnaioBackend:
 
-    def __init__(self, url):
+    def __init__(self, url, auth_mode=AUTH_MODE_SESSION):
 
         self.backend_url = url
+
+        if auth_mode not in AUTH_MODES:
+            raise ValueError(
+                f"Ungueltiger AUTH_MODE '{auth_mode}'. Erlaubt sind: basic, session."
+            )
+        self.auth_mode = auth_mode
+        self._basic_auth = None
 
         self.session = httpx.AsyncClient(verify=False)
 
         self.logger = logging.getLogger(__name__)
 
     def set_auth(self, username: str, password: str):
-        self.session.auth = httpx.BasicAuth(username=username, password=password)
+        self._basic_auth = httpx.BasicAuth(username=username, password=password)
+
+    def _request_kwargs(self, kwargs, session_id=None):
+        """Ergaenzt die Request-Argumente um die konfigurierte Authentifizierung."""
+
+        request_kwargs = dict(kwargs)
+        if self.auth_mode == AUTH_MODE_BASIC:
+            if self._basic_auth is not None:
+                request_kwargs.setdefault("auth", self._basic_auth)
+            return request_kwargs
+        if session_id is None:
+            return request_kwargs
+
+        headers = dict(request_kwargs.get("headers") or {})
+        cookie_key = next((key for key in headers if key.lower() == "cookie"), "Cookie")
+        session_cookie = f"JSESSIONID={session_id}"
+        if headers.get(cookie_key):
+            headers[cookie_key] = f"{headers[cookie_key]}; {session_cookie}"
+        else:
+            headers[cookie_key] = session_cookie
+        request_kwargs["headers"] = headers
+        return request_kwargs
 
     # ------------------------------------------------------------------
     # Gemeinsame Bausteine fuer alle API-Zugriffe
     # ------------------------------------------------------------------
 
-    async def _request(self, method, path, *, context, raise_for_status=True, **kwargs):
+    async def _request(
+        self,
+        method,
+        path,
+        *,
+        context,
+        session_id=None,
+        raise_for_status=True,
+        **kwargs,
+    ):
         """Fuehrt einen Request gegen die Enaio-API aus und normiert die Fehler.
 
         Buendelt die Fehlerbehandlung, die andernfalls in jeder Methode
@@ -141,13 +185,29 @@ class EnaioBackend:
         """
 
         try:
+            request_kwargs = self._request_kwargs(kwargs, session_id)
             response = await self.session.request(
-                method, self.backend_url + path, **kwargs
+                method, self.backend_url + path, **request_kwargs
             )
+            if (
+                self.auth_mode == AUTH_MODE_SESSION
+                and response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN)
+            ):
+                self.logger.warning(
+                    "Authentifizierung an der ENAIO API bei %s fehlgeschlagen (HTTP %s)",
+                    context,
+                    response.status_code,
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail=SESSION_AUTH_FAILED_MESSAGE,
+                )
             if raise_for_status:
                 response.raise_for_status()
             return response
 
+        except HTTPException:
+            raise
         except httpx.RequestError as e:
             self.logger.error("Verbindungsfehler zur ENAIO API bei %s: %s", context, e)
             raise HTTPException(
@@ -171,6 +231,7 @@ class EnaioBackend:
         parameters,
         *,
         context,
+        session_id=None,
         options=None,
         limit=None,
         handle_deleted=EXCLUDE_DELETED,
@@ -203,6 +264,7 @@ class EnaioBackend:
             "POST",
             SEARCH_PATH,
             context=context,
+            session_id=session_id,
             json={"query": query},
             headers={"accept": "application/json"},
         )
@@ -249,13 +311,14 @@ class EnaioBackend:
             "lastModificationDate": child.property("system:lastModificationDate"),
         }
 
-    async def _get_content(self, object_id, content_path):
+    async def _get_content(self, object_id, content_path, session_id=None):
         """Laedt einen Inhaltsstrom eines Objekts (Datei oder Rendition)."""
 
         return await self._request(
             "GET",
             f"/api/dms/objects/{object_id}/contents/{content_path}",
             context=f"Inhalt {content_path} von Objekt {object_id}",
+            session_id=session_id,
             raise_for_status=False,
         )
 
@@ -263,7 +326,7 @@ class EnaioBackend:
     # Fachliche Zugriffe
     # ------------------------------------------------------------------
 
-    async def get_aktenzeichen(self, aktenzeichen):
+    async def get_aktenzeichen(self, aktenzeichen, session_id=None):
         """Laedt die Metadaten eines Vorgangs.
 
         :returns: Tupel ``(objectId, record)``.
@@ -275,6 +338,7 @@ class EnaioBackend:
             "FROM OSTPL_AA WHERE Aktenzeichen=@aktenzeichen",
             {"aktenzeichen": aktenzeichen},
             context=f"Aktenzeichen {aktenzeichen}",
+            session_id=session_id,
         )
 
         akte = self._require_one(objects, "Aktenzeichen", aktenzeichen)
@@ -284,7 +348,7 @@ class EnaioBackend:
         self.logger.debug("Found Aktenzeichen %s", record)
         return (akte.property("system:objectId"), record)
 
-    async def get_running_cases(self, user):
+    async def get_running_cases(self, user, session_id=None):
         """Listet alle laufenden Vorgaenge eines Aktenverantwortlichen auf.
 
         Gesucht wird ueber die Bedingung ``Aktenverantwortlicher=@user AND
@@ -305,6 +369,7 @@ class EnaioBackend:
             "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status",
             {"user": user, "status": RUNNING_CASE_STATUS},
             context=f"Laufende Vorgaenge von {user}",
+            session_id=session_id,
         )
 
         cases = []
@@ -317,7 +382,7 @@ class EnaioBackend:
         self.logger.info("Laufende Vorgaenge von %s: %d Treffer", user, len(cases))
         return cases
 
-    async def get_document_list(self, parent_object_id):
+    async def get_document_list(self, parent_object_id, session_id=None):
         """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""
 
         documents = []
@@ -332,6 +397,7 @@ class EnaioBackend:
                 f"FROM {object_type.table} WHERE system:SDSTA_ID IN (@objectIds)",
                 {"objectIds": parent_object_id},
                 context=context,
+                session_id=session_id,
             )
 
             if not children:
@@ -360,7 +426,7 @@ class EnaioBackend:
         )
         return documents
 
-    async def get_document(self, document_id, content_format):
+    async def get_document(self, document_id, content_format, session_id=None):
         """Laedt ein einzelnes Dokument inklusive Inhalt.
 
         :param content_format: ``"file"`` fuer die Originaldatei, sonst die
@@ -381,6 +447,7 @@ class EnaioBackend:
             },
             limit=1,
             handle_deleted=None,
+            session_id=session_id,
         )
 
         child = self._require_one(objects, "Document", document_id)
@@ -401,9 +468,9 @@ class EnaioBackend:
         else:
             object_id = child.property("system:objectId")
             if content_format == "file":
-                document["content"] = await self.get_file(object_id)
+                document["content"] = await self.get_file(object_id, session_id=session_id)
             else:
-                document["content"] = await self.get_rendition(object_id)
+                document["content"] = await self.get_rendition(object_id, session_id=session_id)
 
         # Bewusst OHNE document["content"] loggen: der Inhalt kann Volltext
         # oder Binaerdaten (potenziell personenbezogen) enthalten.
@@ -411,12 +478,12 @@ class EnaioBackend:
 
         return document
 
-    async def get_file(self, document_id):
-        response = await self._get_content(document_id, "file/1")
+    async def get_file(self, document_id, session_id=None):
+        response = await self._get_content(document_id, "file/1", session_id=session_id)
         return response.content
 
-    async def get_rendition(self, document_id) -> str:
-        response = await self._get_content(document_id, "renditions/text")
+    async def get_rendition(self, document_id, session_id=None) -> str:
+        response = await self._get_content(document_id, "renditions/text", session_id=session_id)
         if response.status_code == httpx.codes.OK:
             return standardize_text(response.text)
 
@@ -512,7 +579,9 @@ class EnaioBackend:
         except (KeyError, IndexError, TypeError):
             return None
 
-    async def upload_document(self, reference, file_path, document_type, betreff, filename):
+    async def upload_document(
+        self, reference, file_path, document_type, betreff, filename, session_id=None
+    ):
         """Laedt eine Datei als neues Dokument in den Vorgang hoch.
 
         Das Dokument wird als OSTPL_AA_DOKUMENT-Objekt unter dem ueber
@@ -527,7 +596,7 @@ class EnaioBackend:
         """
 
         # Elternobjekt (Vorgang) ermitteln; wirft 404, wenn nicht vorhanden.
-        parent_id, _ = await self.get_aktenzeichen(reference)
+        parent_id, _ = await self.get_aktenzeichen(reference, session_id=session_id)
 
         file_bytes = Path(file_path).read_bytes()
         body, content_type = self._build_upload_payload(
@@ -543,6 +612,7 @@ class EnaioBackend:
             "POST",
             "/api/dms/objects?minimalResponse=true",
             context=f"Upload in Vorgang {reference}",
+            session_id=session_id,
             raise_for_status=False,
             content=body,
             headers={
