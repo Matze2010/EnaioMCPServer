@@ -12,6 +12,7 @@ build/
 develop-eggs/
 dist/
 downloads/
+assets/*.docx
 eggs/
 .eggs/
 lib/
