@@ -14,13 +14,15 @@ an. Standard ist die SessionID-Authentifizierung.
 
 ### Tools
 
-Alle Tools und Resources verlangen den Parameter `SessionID`. Fehlt dieser Wert, antwortet
-der Server mit dem Hinweis, dass eine Enaio SessionID Voraussetzung fuer die
-Nutzung des Aufrufs ist. Im Standardmodus `AUTH_MODE=session` wird die
-`SessionID` bei jedem Enaio-API-Aufruf als Cookie `JSESSIONID` uebergeben.
-Schlaegt die Authentifizierung fehl, weist die Antwort darauf hin, den Aufruf
-mit einer aktuellen SessionID zu wiederholen. Fuer Bestandsumgebungen kann mit
-`AUTH_MODE=basic` weiterhin Basic Auth verwendet werden.
+Die sichtbaren Tool-Schemas haengen vom `AUTH_MODE` ab:
+
+| AuthMode | Tools | Resources |
+|----------|-------|-----------|
+| `session` | Alle Tools verlangen den Pflichtparameter `SessionID`; der Server gibt ihn bei jedem Enaio-API-Aufruf als Cookie `JSESSIONID` weiter. | Nicht verfuegbar |
+| `basic` | Dieselben Toolnamen sind ohne `SessionID` verfuegbar; der Server nutzt `USERNAME`/`PASSWORD` fuer Basic Auth. | Verfuegbar ohne `SessionID` in der URI |
+
+Schlaegt die Authentifizierung im Session-Modus fehl, weist die Antwort darauf
+hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
 
 | Tool | Zweck |
 |------|-------|
@@ -38,10 +40,12 @@ wenn ein Entwurf fertig ist oder abgenommen wurde.
 
 ### Resources
 
+Resources sind nur in `AUTH_MODE=basic` sichtbar.
+
 | URI | Inhalt |
 |-----|--------|
-| `document://{SessionID}/{document}/fulltext` | Volltext des Dokuments (Text) |
-| `document://{SessionID}/{document}/file` | Originaldatei des Dokuments (binär) |
+| `document://{document}/fulltext` | Volltext des Dokuments (Text) |
+| `document://{document}/file` | Originaldatei des Dokuments (binär) |
 
 ## Konfiguration
 

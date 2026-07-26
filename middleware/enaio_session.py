@@ -1,8 +1,6 @@
-"""Pruefung der verpflichtenden ``SessionID`` bei Enaio-Aufrufen."""
+"""Pruefung der verpflichtenden ``SessionID`` bei Session-Tools."""
 
-from urllib.parse import urlparse
-
-from fastmcp.exceptions import ResourceError, ToolError
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 SESSION_ID_ARGUMENT = "SessionID"
@@ -29,39 +27,12 @@ def has_usable_session_id(arguments: dict | None) -> bool:
     return True
 
 
-def session_id_from_resource_uri(uri: str | None) -> str | None:
-    """Extrahiert die ``SessionID`` aus ``document://{SessionID}/{document}/...``."""
-
-    if not uri:
-        return None
-
-    parsed = urlparse(uri)
-    if parsed.scheme != "document":
-        return None
-
-    return parsed.netloc or None
-
-
-def has_usable_resource_session_id(uri: str | None) -> bool:
-    """Prueft, ob eine Resource-URI eine nicht-leere ``SessionID`` enthaelt."""
-
-    session_id = session_id_from_resource_uri(uri)
-    return bool(session_id and session_id.strip())
-
-
 class EnaioSessionIDMiddleware(Middleware):
-    """Bricht Enaio-Aufrufe ohne nutzbare ``SessionID`` vor der Ausfuehrung ab."""
+    """Bricht Session-Tool-Aufrufe ohne nutzbare ``SessionID`` vor der Ausfuehrung ab."""
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: CallNext):
         arguments = getattr(context.message, "arguments", None)
         if not has_usable_session_id(arguments):
             raise ToolError(SESSION_ID_REQUIRED_MESSAGE)
-
-        return await call_next(context)
-
-    async def on_read_resource(self, context: MiddlewareContext, call_next: CallNext):
-        uri = getattr(context.message, "uri", None)
-        if not has_usable_resource_session_id(uri):
-            raise ResourceError(SESSION_ID_REQUIRED_MESSAGE)
 
         return await call_next(context)

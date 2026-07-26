@@ -42,6 +42,8 @@ AUTH_MODE = os.environ.get("AUTH_MODE", AUTH_MODE_SESSION).strip().lower()
 if AUTH_MODE not in AUTH_MODES:
         allowed = ", ".join(sorted(AUTH_MODES))
         raise RuntimeError(f"Ungueltiger AUTH_MODE '{AUTH_MODE}'. Erlaubt sind: {allowed}.")
+AUTH_TAG_BASIC = f"auth:{AUTH_MODE_BASIC}"
+AUTH_TAG_SESSION = f"auth:{AUTH_MODE_SESSION}"
 
 backend = EnaioBackend(url=url, auth_mode=AUTH_MODE)
 if AUTH_MODE == AUTH_MODE_BASIC:
@@ -233,7 +235,7 @@ async def _discard_temp_file(path, ctx: Context):
 
 
 async def _load_document_content(
-        document_id: str, content_format: str, session_id: str, ctx: Context
+        document_id: str, content_format: str, session_id: str | None, ctx: Context
 ):
         """Laedt den Inhalt eines Dokuments in der gewuenschten Repraesentation.
 
@@ -248,12 +250,21 @@ async def _load_document_content(
         return document["content"]
 
 
+AUTH_INSTRUCTIONS = (
+        "Im AuthMode session verlangen alle sichtbaren Tools den Parameter SessionID; "
+        "Resources sind in diesem Modus nicht verfuegbar. "
+        if AUTH_MODE == AUTH_MODE_SESSION
+        else
+        "Im AuthMode basic nutzen Tools und Resources die konfigurierte Basic Auth; "
+        "eine SessionID wird nicht abgefragt. "
+)
+
 mcp = FastMCP(
         "Enaio MCP Server",
         instructions=(
                 "Dieser Server gibt Zugriff auf Vorgänge (Akten) und deren Dokumente im "
-                "Dokumenten-Management-System Enaio. Alle Tools und Resources setzen voraus, dass der "
-                "Caller den Parameter SessionID mit einer Enaio SessionID uebergibt. "
+                "Dokumenten-Management-System Enaio. "
+                f"{AUTH_INSTRUCTIONS}"
                 "Ein Vorgang wird über sein Aktenzeichen "
                 "identifiziert, z. B. 'DS.1.2-2024-1234'. Wird ein Vorgang, eine Akte, ein Fall "
                 "oder ein Aktenzeichen erwähnt, ist get_case_metadata das passende Tool. "
@@ -279,14 +290,19 @@ mcp = FastMCP(
 # Resources ueber get_enaio_headers(ctx) als Dict zur Verfuegung.
 mcp.add_middleware(EnaioHeaderMiddleware())
 
-# Erzwingt fuer jeden Tool- und Resource-Aufruf eine nicht-leere Enaio SessionID.
-mcp.add_middleware(EnaioSessionIDMiddleware())
+# Erzwingt im Session-Modus fuer jeden sichtbaren Tool-Aufruf eine nicht-leere
+# Enaio SessionID. Im Basic-Modus existiert dieser Aufrufparameter nicht.
+if AUTH_MODE == AUTH_MODE_SESSION:
+        mcp.add_middleware(EnaioSessionIDMiddleware())
 
 # Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
 # mcp.add_middleware(RequestHeaderLoggingMiddleware())
 
 
 @mcp.tool(
+        name="get_case_metadata",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
         annotations=ToolAnnotations(
                 title="Vorgang / Akte abrufen",
                 readOnlyHint=True,
@@ -295,7 +311,7 @@ mcp.add_middleware(EnaioSessionIDMiddleware())
                 openWorldHint=True,
         ),
 )
-async def get_case_metadata(
+async def get_case_metadata_session(
         reference: Annotated[
                 str,
                 "Aktenzeichen des Vorgangs, z. B. 'DS.1.2-2024-1234' "
@@ -338,6 +354,33 @@ async def get_case_metadata(
 
 
 @mcp.tool(
+        name="get_case_metadata",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=get_case_metadata_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Vorgang / Akte abrufen",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def get_case_metadata_basic(
+        reference: Annotated[
+                str,
+                "Aktenzeichen des Vorgangs, z. B. 'DS.1.2-2024-1234' "
+                "(Format: DS.<Zahl>.<Zahl>-<Jahr>-<laufende Nummer>).",
+        ],
+        ctx: Context,
+) -> dict:
+        return await get_case_metadata_session(reference, None, ctx)
+
+
+@mcp.tool(
+        name="list_running_cases",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
         annotations=ToolAnnotations(
                 title="Laufende Vorgänge auflisten",
                 readOnlyHint=True,
@@ -346,7 +389,7 @@ async def get_case_metadata(
                 openWorldHint=True,
         ),
 )
-async def list_running_cases(
+async def list_running_cases_session(
         user: Annotated[
                 str,
                 "Benutzerkürzel des Aktenverantwortlichen, z. B. 'gisch'. "
@@ -391,11 +434,38 @@ async def list_running_cases(
         }
 
 
+@mcp.tool(
+        name="list_running_cases",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=list_running_cases_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Laufende Vorgänge auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_running_cases_basic(
+        user: Annotated[
+                str,
+                "Benutzerkürzel des Aktenverantwortlichen, z. B. 'gisch'. "
+                "Groß-/Kleinschreibung spielt keine Rolle.",
+        ],
+        ctx: Context,
+) -> dict:
+        return await list_running_cases_session(user, None, ctx)
+
+
 # destructiveHint=True: Der Aufruf legt ein Dokument dauerhaft im Enaio-Vorgang ab und ist
 # nicht zurueckzunehmen. Clients, die auf diesen Hinweis reagieren, holen dann vor dem
 # Aufruf eine ausdrueckliche Bestaetigung des Nutzers ein - zusaetzlich zur Aufrufregel in
 # der Tool-Beschreibung.
 @mcp.tool(
+        name="create_case_document",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
         annotations=ToolAnnotations(
                 title="Dokument erzeugen und in Enaio speichern",
                 readOnlyHint=False,
@@ -404,7 +474,7 @@ async def list_running_cases(
                 openWorldHint=False,
         ),
 )
-async def create_case_document(
+async def create_case_document_session(
         reference: Annotated[
                 str,
                 "Aktenzeichen / Vorgangsnummer des Vorgangs, z. B. 'DS.1.2-2024-1234', "
@@ -712,6 +782,86 @@ async def create_case_document(
 
 
 @mcp.tool(
+        name="create_case_document",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=create_case_document_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Dokument erzeugen und in Enaio speichern",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+        ),
+)
+async def create_case_document_basic(
+        reference: Annotated[
+                str,
+                "Aktenzeichen / Vorgangsnummer des Vorgangs, z. B. 'DS.1.2-2024-1234', "
+                "zu dem das Dokument erstellt wird.",
+        ],
+        document_type: Annotated[
+                str,
+                "Dokumententyp, der die zu verwendende Vorlage bestimmt, z. B. 'Vermerk' oder 'Brief'.",
+        ],
+        content: Annotated[
+                List[dict],
+                (
+                        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
+                        "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
+                        '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
+                        '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
+                        '- para:       {"type":"para","runs":[{"t":"Fett: ","b":true},{"t":"normaler Text."}],"jc":"both"}\n'
+                        '              Kurzform ohne Formatierung: {"type":"para","text":"einfacher Absatz"}\n'
+                        '- listitem:   {"type":"listitem","number":1,"text":"nummerierter Punkt"}  '
+                        '(ohne "number" bzw. number=null -> Aufzaehlung)\n'
+                        '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
+                        "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
+                        "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
+                        "Beispiel: "
+                        '[{"type":"heading","text":"1. Sachverhalt"},'
+                        '{"type":"subheading","text":"Auflagen"},'
+                        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
+                        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
+                        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
+                ),
+        ],
+        ctx: Context,
+        betreff: Annotated[
+                Optional[str],
+                "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage.",
+        ] = None,
+        fields: Annotated[
+                Optional[dict],
+                (
+                        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
+                        "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
+                        "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
+                        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\",\"Bearbeiter\":\"Max Mustermann\"}. "
+                        "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
+                        "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
+                        "angegeben - aus 'reference' uebernommen. Die Angaben zum aufrufenden Benutzer "
+                        "([Mail], [Name], [Username]) werden - sofern nicht angegeben - automatisch aus "
+                        "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
+                        "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
+                ),
+        ] = None,
+) -> dict:
+        return await create_case_document_session(
+                reference,
+                document_type,
+                content,
+                None,
+                ctx,
+                betreff=betreff,
+                fields=fields,
+        )
+
+
+@mcp.tool(
+        name="access_document_fulltext",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
         annotations=ToolAnnotations(
                 title="Dokumentinhalt als Text lesen",
                 readOnlyHint=True,
@@ -720,7 +870,7 @@ async def create_case_document(
                 openWorldHint=True,
         ),
 )
-async def access_document_fulltext(
+async def access_document_fulltext_session(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
@@ -741,6 +891,29 @@ async def access_document_fulltext(
 
 
 @mcp.tool(
+        name="access_document_fulltext",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=access_document_fulltext_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Dokumentinhalt als Text lesen",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def access_document_fulltext_basic(
+        document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
+        ctx: Context,
+) -> str:
+        return await access_document_fulltext_session(document, None, ctx)
+
+
+@mcp.tool(
+        name="download_document",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
         annotations=ToolAnnotations(
                 title="Dokument als Datei herunterladen",
                 readOnlyHint=True,
@@ -749,7 +922,7 @@ async def access_document_fulltext(
                 openWorldHint=True,
         ),
 )
-async def download_document(
+async def download_document_session(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
@@ -770,26 +943,51 @@ async def download_document(
         return base64.b64encode(content).decode("ascii")
 
 
-@mcp.resource("document://{SessionID}/{document}/fulltext")
-async def resource_access_document_fulltext(SessionID: str, document: str, ctx: Context) -> str:
+@mcp.tool(
+        name="download_document",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=download_document_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Dokument als Datei herunterladen",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def download_document_basic(
+        document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
+        ctx: Context,
+) -> str:
+        return await download_document_session(document, None, ctx)
+
+
+@mcp.resource("document://{document}/fulltext", tags={AUTH_TAG_BASIC})
+async def resource_access_document_fulltext(document: str, ctx: Context) -> str:
         """
         Access documents fulltext. The document's content is provided as text representation.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         :param document: Dokument-ID
         """
 
-        return await _load_document_content(document, "text", SessionID, ctx)
+        return await _load_document_content(document, "text", None, ctx)
 
 
-@mcp.resource("document://{SessionID}/{document}/file")
-async def resource_download_document(SessionID: str, document: str, ctx: Context) -> bytes:
+@mcp.resource("document://{document}/file", tags={AUTH_TAG_BASIC})
+async def resource_download_document(document: str, ctx: Context) -> bytes:
         """
         Access document and download as file. The document's content is provided as binary representation.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         :param document: Dokument-ID
         """
 
-        return await _load_document_content(document, "file", SessionID, ctx)
+        return await _load_document_content(document, "file", None, ctx)
+
+
+mcp.enable(
+        tags={f"auth:{AUTH_MODE}"},
+        components={"tool", "resource", "template"},
+        only=True,
+)
 
 
 if __name__ == "__main__":

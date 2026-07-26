@@ -29,7 +29,7 @@ async def test_list_running_cases_adds_dms_link(monkeypatch):
     monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", "https://enaio.test")
     monkeypatch.setattr(EnaioMCP.backend, "get_running_cases", fake_get_running_cases)
 
-    result = await EnaioMCP.list_running_cases("gisch", "SESSION-1", _Ctx())
+    result = await EnaioMCP.list_running_cases_session("gisch", "SESSION-1", _Ctx())
 
     assert result["count"] == 2
     for case, object_id in zip(result["cases"], ["132887", "132888"]):
@@ -49,6 +49,6 @@ async def test_list_running_cases_without_link_when_unconfigured(monkeypatch):
     monkeypatch.setattr(EnaioMCP, "DMS_WEB_URL", "DEFAULT_URL")
     monkeypatch.setattr(EnaioMCP.backend, "get_running_cases", fake_get_running_cases)
 
-    result = await EnaioMCP.list_running_cases("gisch", "SESSION-1", _Ctx())
+    result = await EnaioMCP.list_running_cases_session("gisch", "SESSION-1", _Ctx())
 
     assert "dms_link" not in result["cases"][0]

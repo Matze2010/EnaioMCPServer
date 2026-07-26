@@ -1,17 +1,16 @@
-"""Tests fuer die verpflichtende ``SessionID`` aller MCP-Tools und Resources."""
+"""Tests fuer die AuthMode-abhaengigen Tool- und Resource-Schemas."""
 
+import importlib
 from types import SimpleNamespace
 
 import pytest
-from fastmcp.exceptions import ResourceError, ToolError
+from fastmcp.exceptions import ToolError
 
 import EnaioMCP
 from middleware import (
     SESSION_ID_DESCRIPTION,
     SESSION_ID_REQUIRED_MESSAGE,
     EnaioSessionIDMiddleware,
-    has_usable_resource_session_id,
-    session_id_from_resource_uri,
 )
 
 
@@ -21,10 +20,18 @@ def _context(arguments=None, tool_name="get_case_metadata"):
     return SimpleNamespace(message=SimpleNamespace(name=tool_name, arguments=arguments))
 
 
-def _resource_context(uri="document://SESSION-1/132887/fulltext"):
-    """Minimaler Middleware-Context mit Resource-URI."""
+@pytest.fixture
+def load_enaio_mcp(monkeypatch):
+    """Laedt EnaioMCP mit einem bestimmten AUTH_MODE und stellt session wieder her."""
 
-    return SimpleNamespace(message=SimpleNamespace(uri=uri))
+    def _load(auth_mode):
+        monkeypatch.setenv("AUTH_MODE", auth_mode)
+        return importlib.reload(EnaioMCP)
+
+    yield _load
+
+    monkeypatch.setenv("AUTH_MODE", "session")
+    importlib.reload(EnaioMCP)
 
 
 @pytest.mark.parametrize(
@@ -48,27 +55,6 @@ async def test_session_id_middleware_rejects_missing_or_empty_value(arguments):
     assert str(excinfo.value) == SESSION_ID_REQUIRED_MESSAGE
 
 
-@pytest.mark.parametrize(
-    "uri",
-    [
-        None,
-        "",
-        "document:///132887/fulltext",
-        "document://   /132887/fulltext",
-    ],
-)
-async def test_session_id_middleware_rejects_missing_or_empty_resource_session(uri):
-    async def call_next(_context):
-        raise AssertionError("Resource-Aufruf darf ohne SessionID nicht weiterlaufen")
-
-    middleware = EnaioSessionIDMiddleware()
-
-    with pytest.raises(ResourceError) as excinfo:
-        await middleware.on_read_resource(_resource_context(uri), call_next)
-
-    assert str(excinfo.value) == SESSION_ID_REQUIRED_MESSAGE
-
-
 async def test_session_id_middleware_passes_non_empty_value():
     seen = []
 
@@ -81,26 +67,6 @@ async def test_session_id_middleware_passes_non_empty_value():
 
     assert await middleware.on_call_tool(context, call_next) == "ok"
     assert seen == [context]
-
-
-async def test_session_id_middleware_passes_non_empty_resource_session():
-    seen = []
-
-    async def call_next(context):
-        seen.append(context)
-        return "ok"
-
-    context = _resource_context("document://SESSION-1/132887/fulltext")
-    middleware = EnaioSessionIDMiddleware()
-
-    assert await middleware.on_read_resource(context, call_next) == "ok"
-    assert seen == [context]
-
-
-def test_resource_session_id_helpers_parse_document_uri():
-    assert session_id_from_resource_uri("document://SESSION-1/132887/fulltext") == "SESSION-1"
-    assert has_usable_resource_session_id("document://SESSION-1/132887/file") is True
-    assert has_usable_resource_session_id("document:///132887/file") is False
 
 
 @pytest.mark.parametrize(
@@ -120,16 +86,59 @@ async def test_session_id_is_required_in_all_tool_schemas(tool_name):
     assert tool.parameters["properties"]["SessionID"]["description"] == SESSION_ID_DESCRIPTION
 
 
+async def test_resources_are_hidden_in_session_mode():
+    templates = await EnaioMCP.mcp.list_resource_templates()
+
+    assert templates == []
+
+
 @pytest.mark.parametrize(
-    "uri_template",
+    "tool_name",
     [
-        "document://{SessionID}/{document}/fulltext",
-        "document://{SessionID}/{document}/file",
+        "get_case_metadata",
+        "list_running_cases",
+        "create_case_document",
+        "access_document_fulltext",
+        "download_document",
     ],
 )
-async def test_session_id_is_required_in_all_resource_templates(uri_template):
-    templates = await EnaioMCP.mcp.list_resource_templates()
-    template = next(item for item in templates if item.uri_template == uri_template)
+async def test_basic_tool_schemas_do_not_include_session_id(load_enaio_mcp, tool_name):
+    module = load_enaio_mcp("basic")
+    tool = await module.mcp.get_tool(tool_name)
 
-    assert "SessionID" in template.parameters["required"]
-    assert "document" in template.parameters["required"]
+    assert tool.version == "basic"
+    assert "SessionID" not in tool.parameters.get("required", [])
+    assert "SessionID" not in tool.parameters["properties"]
+
+
+async def test_basic_resource_templates_do_not_include_session_id(load_enaio_mcp):
+    module = load_enaio_mcp("basic")
+    templates = await module.mcp.list_resource_templates()
+
+    assert [item.uri_template for item in templates] == [
+        "document://{document}/fulltext",
+        "document://{document}/file",
+    ]
+    for template in templates:
+        assert template.parameters["required"] == ["document"]
+        assert "SessionID" not in template.parameters["properties"]
+
+
+async def test_basic_tool_passes_no_session_id_to_backend(load_enaio_mcp, monkeypatch):
+    module = load_enaio_mcp("basic")
+    seen = []
+
+    class Ctx:
+        async def info(self, _message):
+            pass
+
+    async def fake_get_document(document_id, content_format, session_id=None):
+        seen.append((document_id, content_format, session_id))
+        return {"content": "Volltext"}
+
+    monkeypatch.setattr(module.backend, "get_document", fake_get_document)
+
+    result = await module.access_document_fulltext_basic("DOC-1", Ctx())
+
+    assert result == "Volltext"
+    assert seen == [("DOC-1", "text", None)]

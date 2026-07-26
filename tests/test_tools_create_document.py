@@ -53,7 +53,7 @@ def stubbed_document(monkeypatch, tmp_path):
 async def test_create_case_document_returns_edit_link(stubbed_document):
     stubbed_document("305821")
 
-    result = await EnaioMCP.create_case_document(
+    result = await EnaioMCP.create_case_document_session(
         "DS.1.2-2024-1234",
         "Vermerk",
         [{"type": "para", "text": "Inhalt"}],
@@ -72,7 +72,7 @@ async def test_create_case_document_without_link_when_object_id_missing(stubbed_
     # Ohne ObjectID aus Enaio bleibt das Feld weg statt kaputt zu sein.
     stubbed_document(None)
 
-    result = await EnaioMCP.create_case_document(
+    result = await EnaioMCP.create_case_document_session(
         "DS.1.2-2024-1234",
         "Vermerk",
         [{"type": "para", "text": "Inhalt"}],

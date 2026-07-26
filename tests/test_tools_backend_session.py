@@ -33,7 +33,7 @@ async def test_get_case_metadata_passes_session_id_to_backend(monkeypatch):
     monkeypatch.setattr(EnaioMCP.backend, "get_aktenzeichen", fake_get_aktenzeichen)
     monkeypatch.setattr(EnaioMCP.backend, "get_document_list", fake_get_document_list)
 
-    await EnaioMCP.get_case_metadata("DS.1.2-2024-1234", "SESSION-1", _Ctx())
+    await EnaioMCP.get_case_metadata_session("DS.1.2-2024-1234", "SESSION-1", _Ctx())
 
     assert seen == [
         ("get_aktenzeichen", "DS.1.2-2024-1234", "SESSION-1"),
@@ -50,7 +50,7 @@ async def test_access_document_fulltext_passes_session_id_to_backend(monkeypatch
 
     monkeypatch.setattr(EnaioMCP.backend, "get_document", fake_get_document)
 
-    result = await EnaioMCP.access_document_fulltext("DOC-1", "SESSION-1", _Ctx())
+    result = await EnaioMCP.access_document_fulltext_session("DOC-1", "SESSION-1", _Ctx())
 
     assert result == "Volltext"
     assert seen == [("DOC-1", "text", "SESSION-1")]
@@ -65,13 +65,13 @@ async def test_download_document_passes_session_id_to_backend(monkeypatch):
 
     monkeypatch.setattr(EnaioMCP.backend, "get_document", fake_get_document)
 
-    result = await EnaioMCP.download_document("DOC-1", "SESSION-1", _Ctx())
+    result = await EnaioMCP.download_document_session("DOC-1", "SESSION-1", _Ctx())
 
     assert result == "QklOQVJZ"
     assert seen == [("DOC-1", "file", "SESSION-1")]
 
 
-async def test_resource_fulltext_passes_session_id_to_backend(monkeypatch):
+async def test_resource_fulltext_uses_basic_auth_without_session_id(monkeypatch):
     seen = []
 
     async def fake_get_document(document_id, content_format, session_id=None):
@@ -80,7 +80,7 @@ async def test_resource_fulltext_passes_session_id_to_backend(monkeypatch):
 
     monkeypatch.setattr(EnaioMCP.backend, "get_document", fake_get_document)
 
-    result = await EnaioMCP.resource_access_document_fulltext("SESSION-1", "DOC-1", _Ctx())
+    result = await EnaioMCP.resource_access_document_fulltext("DOC-1", _Ctx())
 
     assert result == "Volltext"
-    assert seen == [("DOC-1", "text", "SESSION-1")]
+    assert seen == [("DOC-1", "text", None)]
