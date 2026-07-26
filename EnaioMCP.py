@@ -489,6 +489,11 @@ async def create_case_document_session(
         content: Annotated[
                 List[dict],
                 (
+                        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
+                        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
+                        "Array und kein vorheriges json.dumps(...). Richtig: "
+                        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
+                        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
                         "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
                         "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
                         '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
@@ -792,7 +797,7 @@ async def create_case_document_session(
         name="create_case_document",
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
-        description=create_case_document_session.__doc__,
+        description=create_case_document_session.__doc__.split("\n        :param", 1)[0],
         annotations=ToolAnnotations(
                 title="Dokument erzeugen und in Enaio speichern",
                 readOnlyHint=False,
@@ -814,6 +819,11 @@ async def create_case_document_basic(
         content: Annotated[
                 List[dict],
                 (
+                        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
+                        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
+                        "Array und kein vorheriges json.dumps(...). Richtig: "
+                        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
+                        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
                         "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
                         "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
                         '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'

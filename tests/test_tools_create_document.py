@@ -124,6 +124,17 @@ async def test_fields_annotation_mentions_common_placeholders():
         assert f"[{placeholder}]" in description
 
 
+async def test_content_annotation_rejects_json_array_as_string():
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    description = tool.parameters["properties"]["content"]["description"]
+
+    assert "JSON-Array" in description
+    assert "nicht als String" in description
+    assert "json.dumps" in description
+    assert '{"content":[{"type":"para","text":"Text"}]}' in description
+    assert '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}' in description
+
+
 async def test_create_case_document_is_marked_destructive():
     # Clients, die auf destructiveHint reagieren, sollen vor dem Speichern nachfragen.
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
