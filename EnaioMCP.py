@@ -251,12 +251,11 @@ async def _load_document_content(
 
 
 AUTH_INSTRUCTIONS = (
-        "Im AuthMode session verlangen alle sichtbaren Tools den Parameter SessionID; "
-        "Resources sind in diesem Modus nicht verfuegbar. "
+        "Alle Tools setzen voraus, dass der "
+        "Caller den Parameter SessionID mit einer Enaio SessionID uebergibt. "
         if AUTH_MODE == AUTH_MODE_SESSION
         else
-        "Im AuthMode basic nutzen Tools und Resources die konfigurierte Basic Auth; "
-        "eine SessionID wird nicht abgefragt. "
+        ""
 )
 
 mcp = FastMCP(
