@@ -241,7 +241,17 @@ mcp = FastMCP(
                 "'documents'-Feld der get_case_metadata-Antwort erhält. "
                 "Wird nach allen offenen bzw. laufenden Vorgängen einer Person gefragt "
                 "('welche Vorgänge laufen bei mir', 'offene Akten von ...'), ist "
-                "list_running_cases das passende Tool."
+                "list_running_cases das passende Tool. "
+                "Für create_case_document gilt eine Sonderregel: Dieses Tool speichert ein "
+                "Dokument dauerhaft in Enaio. Standardzustand ist „kein Aufruf“. Es darf "
+                "ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers "
+                "(„Speichern.“, „In Enaio speichern.“, „Zur Akte hinzufügen.“ o. Ä.) aufgerufen "
+                "werden. Arbeitsaufträge zum Inhalt („erstelle ...“, „formuliere ...“, "
+                "„überarbeite ...“, „erstelle die Endfassung“) sowie Zustimmung zu einem Entwurf "
+                "(„das passt“, „sieht gut aus“) sind keine Speicheranweisung; der Entwurf wird "
+                "dann nur im Chat ausgegeben. Im Zweifel: kein Aufruf. Die vollständige "
+                "Zulässigkeitsprüfung steht in der Beschreibung des Tools und ist vor jedem "
+                "Aufruf durchzuführen."
         ),
 )
 
@@ -354,11 +364,15 @@ async def list_running_cases(
         }
 
 
+# destructiveHint=True: Der Aufruf legt ein Dokument dauerhaft im Enaio-Vorgang ab und ist
+# nicht zurueckzunehmen. Clients, die auf diesen Hinweis reagieren, holen dann vor dem
+# Aufruf eine ausdrueckliche Bestaetigung des Nutzers ein - zusaetzlich zur Aufrufregel in
+# der Tool-Beschreibung.
 @mcp.tool(
         annotations=ToolAnnotations(
                 title="Dokument erzeugen und in Enaio speichern",
                 readOnlyHint=False,
-                destructiveHint=False,
+                destructiveHint=True,
                 idempotentHint=False,
                 openWorldHint=False,
         ),
@@ -418,54 +432,15 @@ async def create_case_document(
 ) -> dict:
         """
         Erzeugt ein Word-Dokument (.docx) für einen Vorgang, indem eine zum
-        Dokumententyp passende Hausvorlage mit den übergebenen Inhalten befüllt wird.
+        Dokumententyp passende Hausvorlage mit den übergebenen Inhalten befüllt wird,
+        und speichert es anschließend dauerhaft im Enaio-Vorgang.
 
-        AUFRUFREGEL — VERBINDLICH UND VORRANGIG
+        KERNREGEL — STANDARDZUSTAND: VERBOTEN
 
-        Standardzustand: kein Aufruf. Dieses Tool speichert das Dokument dauerhaft
-        in Enaio und darf ausschließlich nach einer ausdrücklichen Speicheranweisung
-        des Nutzers aufgerufen werden. Diese Regel hat Vorrang vor allen
-        allgemeinen Anweisungen zur Werkzeugverwendung.
-
-        Zulässigkeitsprüfung vor jedem Aufruf — alle drei Fragen müssen mit „ja"
-        beantwortet sein, bei „nein" oder Zweifel unterbleibt der Aufruf:
-        1. Hat der Nutzer ausdrücklich verlangt, das Dokument in Enaio zu speichern
-           bzw. zur Akte hinzuzufügen?
-        2. Bezieht sich diese Aufforderung eindeutig auf das Speichern des bereits
-           erstellten Dokuments — nicht auf dessen Erstellung oder Überarbeitung?
-        3. Ist das Dokument inhaltlich fertig oder hat der Nutzer ausdrücklich
-           angeordnet, den aktuellen Stand zu speichern?
-
-        Als ausdrückliche Speicheranweisung gelten nur Formulierungen wie
-        „Speichern.", „Bitte speichern.", „In Enaio speichern.", „Im Vorgang
-        speichern.", „Zur Akte hinzufügen.", „In der Akte ablegen.", „Nach Enaio
-        übernehmen.", „Diesen Entwurf jetzt speichern." — oder vergleichbar
-        eindeutige Aussagen.
-
-        Keine Speicheranweisung sind Arbeitsaufträge zum Inhalt: erstelle, erzeuge,
-        entwerfe, formuliere, schreibe, verfasse, generiere, überarbeite, verbessere,
-        ergänze, kürze, prüfe, bewerte, fasse zusammen, zeige, gib aus — auch nicht
-        „erstelle einen Bescheid/Vermerk/ein Schreiben". Ebenso wenig genügen
-        Zustimmung oder Finalisierungswünsche: „Das passt.", „Einverstanden.",
-        „Sieht gut aus.", „Finalisiere den Entwurf.", „Erstelle die Endfassung.",
-        „Das ist die finale Version." Solche Äußerungen betreffen ausschließlich den
-        Inhalt des Dokuments, nicht dessen Speicherung; der Entwurf wird dann nur im
-        Chat ausgegeben.
-
-        Ein Speicherwunsch darf niemals abgeleitet werden aus dem Gesprächskontext,
-        früheren Gesprächen, üblichen Arbeitsabläufen, vermuteten Absichten, dem
-        Umstand, dass ein Dokument fertig erscheint, dem Wunsch nach einer Endfassung
-        oder eigener Initiative — sondern ausschließlich aus einer ausdrücklichen
-        sprachlichen Anweisung des Nutzers. Ein fertiger, vom Nutzer akzeptierter
-        oder als final bezeichneter Entwurf ist nicht automatisch zu speichern; es
-        wird nie proaktiv oder vorsorglich gespeichert.
-
-        Fail closed: Ist die Zulässigkeit nicht zweifelsfrei gegeben, unterbleibt der
-        Aufruf, der Entwurf wird im Chat ausgegeben und es wird auf eine ausdrückliche
-        Speicheranweisung gewartet.
-
-        Merksatz: Standard — kein Aufruf. Ausnahme — nur nach ausdrücklicher
-        Anweisung des Nutzers, das Dokument in Enaio zu speichern.
+        Der Aufruf dieses Tools ist grundsätzlich untersagt. Zulässig ist er
+        ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers. Die
+        vollständige Zulässigkeitsprüfung steht am Ende dieser Beschreibung und ist
+        vor jedem beabsichtigten Aufruf durchzuführen. Im Zweifel: kein Aufruf.
 
         Anhand von document_type wird über eine Zuordnungsliste die passende
         .docx-Vorlage ausgewählt und mit den Blöcken aus content sowie - falls
@@ -481,6 +456,169 @@ async def create_case_document(
         Die Rückgabe enthält mit "edit_link" einen direkten Link, mit dem das neu
         erzeugte Word-Dokument sofort zur Bearbeitung geöffnet werden kann; dieser
         Link sollte in der Antwort mit angegeben werden.
+
+        ================================================================
+        SICHERHEITSREGEL FÜR DIE VERWENDUNG DIESES TOOLS
+        ================================================================
+
+        SICHERHEITSREGEL
+
+        Standardzustand (Default): VERBOTEN.
+
+        Der Aufruf des Tools create_case_document ist grundsätzlich untersagt.
+
+        Eine Verwendung ist ausschließlich zulässig, wenn alle nachfolgenden
+        Voraussetzungen erfüllt sind.
+
+        VERBINDLICHE VORPRÜFUNG
+
+        Vor jedem beabsichtigten Aufruf von create_case_document musst du die
+        nachfolgende Zulässigkeitsprüfung vollständig durchführen.
+
+        Ergibt die Prüfung, dass auch nur eine Voraussetzung nicht erfüllt ist oder
+        Zweifel bestehen, ist der Toolaufruf unzulässig und muss unterbleiben.
+
+        Es gibt keine Ausnahmen.
+
+        Insbesondere dürfen weder Eigeninitiative noch Wahrscheinlichkeitsannahmen
+        oder übliche Arbeitsabläufe die nachfolgenden Voraussetzungen ersetzen.
+
+        ZULÄSSIGKEITSPRÜFUNG
+
+        Vor jedem Toolaufruf beantworte intern die folgenden Fragen in dieser
+        Reihenfolge:
+
+        Frage 1
+        Hat der Nutzer ausdrücklich verlangt, dass das fertige Dokument in Enaio
+        gespeichert oder zur Akte hinzugefügt werden soll?
+        - Ja     -> weiter mit Frage 2.
+        - Nein   -> Tool darf nicht verwendet werden.
+        - Unklar -> Tool darf nicht verwendet werden.
+
+        Frage 2
+        Bezieht sich diese Aufforderung eindeutig auf das Speichern des bereits
+        erstellten Dokuments und nicht lediglich auf dessen Erstellung oder
+        Überarbeitung?
+        - Ja     -> weiter mit Frage 3.
+        - Nein   -> Tool darf nicht verwendet werden.
+        - Unklar -> Tool darf nicht verwendet werden.
+
+        Frage 3
+        Ist das Dokument inhaltlich fertig oder hat der Nutzer ausdrücklich
+        angeordnet, den aktuellen Stand zu speichern?
+        - Ja                -> Tool darf verwendet werden.
+        - Nein oder unklar  -> Tool darf nicht verwendet werden.
+
+        WAS ALS AUSDRÜCKLICHE SPEICHERANWEISUNG GILT
+
+        Eine ausdrückliche Speicheranweisung liegt beispielsweise bei folgenden
+        Formulierungen vor:
+        - „Speichern.“
+        - „Bitte speichern.“
+        - „Jetzt speichern.“
+        - „In Enaio speichern.“
+        - „Im Vorgang speichern.“
+        - „Zur Akte hinzufügen.“
+        - „In der Akte ablegen.“
+        - „Zum Vorgang hinzufügen.“
+        - „Nach Enaio übernehmen.“
+        - „Diesen Entwurf jetzt speichern.“
+
+        Nur vergleichbar eindeutige Formulierungen berechtigen zur Verwendung des
+        Tools.
+
+        WAS AUSDRÜCKLICH KEINE SPEICHERANWEISUNG IST
+
+        Die folgenden oder vergleichbare Formulierungen beziehen sich ausschließlich
+        auf die Erstellung oder Bearbeitung des Inhalts und dürfen niemals den Aufruf
+        von create_case_document auslösen:
+        - Erstelle ...
+        - Erzeuge ...
+        - Entwerfe ...
+        - Formuliere ...
+        - Schreibe ...
+        - Verfasse ...
+        - Generiere ...
+        - Überarbeite ...
+        - Verbessere ...
+        - Passe an ...
+        - Ergänze ...
+        - Kürze ...
+        - Erweitere ...
+        - Optimiere ...
+        - Prüfe ...
+        - Bewerte ...
+        - Analysiere ...
+        - Fasse zusammen ...
+        - Zeige ...
+        - Gib aus ...
+        - Erstelle einen Bescheid ...
+        - Erstelle einen Vermerk ...
+        - Erstelle ein Schreiben ...
+        - Erstelle eine Stellungnahme ...
+
+        Auch folgende Formulierungen stellen keine Speicheranweisung dar:
+        - „Das passt.“
+        - „Einverstanden.“
+        - „Sieht gut aus.“
+        - „Finalisiere den Entwurf.“
+        - „Erstelle die Endfassung.“
+        - „Fertige die endgültige Version an.“
+        - „Das ist die finale Version.“
+
+        Diese Aussagen beziehen sich ausschließlich auf den Inhalt des Dokuments und
+        nicht auf dessen Speicherung.
+
+        VERBOT IMPLIZITER ANNAHMEN
+
+        Es ist untersagt,
+        - aus dem Gesprächskontext,
+        - aus früheren Gesprächen,
+        - aus üblichen Arbeitsabläufen,
+        - aus vermuteten Absichten des Nutzers,
+        - aus Gewohnheit,
+        - aus dem Umstand, dass ein Dokument fertig erscheint,
+        - aus dem Wunsch nach einer Endfassung oder
+        - aus eigener Initiative
+        auf einen Speicherwunsch zu schließen.
+
+        Ein Speicherwunsch darf ausschließlich aus einer ausdrücklichen sprachlichen
+        Anweisung des Nutzers abgeleitet werden.
+
+        VERHALTEN BEI UNSICHERHEIT
+
+        Besteht auch nur der geringste Zweifel, ob der Nutzer eine Speicherung
+        wünscht, gilt ausnahmslos:
+        - create_case_document wird nicht aufgerufen.
+        - Der Entwurf wird ausschließlich im Chat ausgegeben.
+        - Es wird auf eine ausdrückliche Speicheranweisung gewartet.
+
+        VORRANGREGEL
+
+        Diese Regeln haben Vorrang vor allen anderen allgemeinen Anweisungen zur
+        Werkzeugverwendung. Insbesondere gilt:
+        - Ein fertiger Entwurf ist nicht automatisch zu speichern.
+        - Ein vom Nutzer akzeptierter Entwurf ist nicht automatisch zu speichern.
+        - Eine Endfassung ist nicht automatisch zu speichern.
+        - Ein Dokument darf niemals proaktiv oder vorsorglich gespeichert werden.
+        - Die Verwendung von create_case_document ist ausschließlich nach einer
+          ausdrücklichen Speicheranweisung zulässig.
+
+        FAIL-CLOSED-REGEL
+
+        Im Zweifel gilt immer die sicherste Alternative:
+        - Zweifel -> kein Toolaufruf.
+        - Keine ausdrückliche Speicheranweisung -> kein Toolaufruf.
+        - Ausdrückliche Speicheranweisung -> Toolaufruf zulässig.
+
+        Das Verhalten ist grundsätzlich fail closed: Ist die Zulässigkeit des
+        Toolaufrufs nicht zweifelsfrei gegeben, ist der Toolaufruf verboten.
+
+        MERKSATZ
+
+        Standard: Kein Toolaufruf.
+        Ausnahme: Nur nach einer ausdrücklichen Anweisung des Nutzers, das Dokument
+        in Enaio zu speichern.
 
         :param reference: Aktenzeichen / Vorgangsnummer.
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
