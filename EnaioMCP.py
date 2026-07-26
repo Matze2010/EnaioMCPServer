@@ -238,7 +238,7 @@ mcp = FastMCP(
         "Enaio MCP Server",
         instructions=(
                 "Dieser Server gibt Zugriff auf Vorgänge (Akten) und deren Dokumente im "
-                "Dokumenten-Management-System Enaio. Alle Tools setzen voraus, dass der "
+                "Dokumenten-Management-System Enaio. Alle Tools und Resources setzen voraus, dass der "
                 "Caller den Parameter SessionID mit einer Enaio SessionID uebergibt. "
                 "Ein Vorgang wird über sein Aktenzeichen "
                 "identifiziert, z. B. 'DS.1.2-2024-1234'. Wird ein Vorgang, eine Akte, ein Fall "
@@ -265,7 +265,7 @@ mcp = FastMCP(
 # Resources ueber get_enaio_headers(ctx) als Dict zur Verfuegung.
 mcp.add_middleware(EnaioHeaderMiddleware())
 
-# Erzwingt fuer jeden Tool-Aufruf eine nicht-leere Enaio SessionID.
+# Erzwingt fuer jeden Tool- und Resource-Aufruf eine nicht-leere Enaio SessionID.
 mcp.add_middleware(EnaioSessionIDMiddleware())
 
 # Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
@@ -755,20 +755,22 @@ async def download_document(
         return base64.b64encode(content).decode("ascii")
 
 
-@mcp.resource("document://{document}/fulltext")
-async def resource_access_document_fulltext(document: str, ctx: Context) -> str:
+@mcp.resource("document://{SessionID}/{document}/fulltext")
+async def resource_access_document_fulltext(SessionID: str, document: str, ctx: Context) -> str:
         """
         Access documents fulltext. The document's content is provided as text representation.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         :param document: Dokument-ID
         """
 
         return await _load_document_content(document, "text", ctx)
 
 
-@mcp.resource("document://{document}/file")
-async def resource_download_document(document: str, ctx: Context) -> bytes:
+@mcp.resource("document://{SessionID}/{document}/file")
+async def resource_download_document(SessionID: str, document: str, ctx: Context) -> bytes:
         """
         Access document and download as file. The document's content is provided as binary representation.
+        :param SessionID: Enaio SessionID des aufrufenden Clients.
         :param document: Dokument-ID
         """
 
