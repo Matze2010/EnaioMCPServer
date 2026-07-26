@@ -228,7 +228,7 @@ mcp = FastMCP(
 mcp.add_middleware(EnaioHeaderMiddleware())
 
 # Protokolliert bei jedem Tool-Aufruf die Header des eingehenden HTTP-Requests.
-mcp.add_middleware(RequestHeaderLoggingMiddleware())
+# mcp.add_middleware(RequestHeaderLoggingMiddleware())
 
 
 @mcp.tool(
