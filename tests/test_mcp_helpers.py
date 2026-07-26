@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 import EnaioMCP
+from middleware import ENAIO_STATE_KEY
 
 
 @pytest.mark.parametrize(
@@ -85,6 +86,64 @@ def test_render_document_maps_template_errors_to_422(monkeypatch, tmp_path):
 
     assert excinfo.value.status_code == 422
     assert "Kein <w:sectPr> gefunden" in excinfo.value.detail
+
+
+class _Ctx:
+    """Context-Ersatz, der die von der Middleware abgelegten Header liefert."""
+
+    def __init__(self, enaio=None):
+        self._state = {ENAIO_STATE_KEY: enaio} if enaio is not None else {}
+
+    async def get_state(self, key):
+        return self._state.get(key)
+
+
+async def test_document_fields_uses_reference_and_headers():
+    fields = await EnaioMCP._document_fields(
+        "DS.1.2-2024-1234",
+        None,
+        _Ctx({"mail": "mathias.gisch@me.com", "name": "admin-gisch"}),
+    )
+
+    assert fields == {
+        "Aktenzeichen": "DS.1.2-2024-1234",
+        "Mail": "mathias.gisch@me.com",
+        "Name": "admin-gisch",
+    }
+
+
+async def test_document_fields_keeps_explicit_values():
+    """Ausdruecklich uebergebene Werte haben Vorrang vor Header und reference."""
+
+    fields = await EnaioMCP._document_fields(
+        "DS.1.2-2024-1234",
+        {"Aktenzeichen": "DS.9.9-2020-1", "Name": "Max Mustermann"},
+        _Ctx({"name": "admin-gisch", "mail": "a@b.de"}),
+    )
+
+    assert fields == {
+        "Aktenzeichen": "DS.9.9-2020-1",
+        "Name": "Max Mustermann",
+        "Mail": "a@b.de",
+    }
+
+
+async def test_document_fields_without_headers():
+    """Ohne HTTP-Request (z. B. stdio) bleibt es beim Aktenzeichen."""
+
+    assert await EnaioMCP._document_fields("DS.1.2-2024-1234", None, _Ctx()) == {
+        "Aktenzeichen": "DS.1.2-2024-1234"
+    }
+
+
+async def test_document_fields_does_not_mutate_input():
+    original = {"Bearbeiter": "Max Mustermann"}
+
+    await EnaioMCP._document_fields(
+        "DS.1.2-2024-1234", original, _Ctx({"mail": "a@b.de"})
+    )
+
+    assert original == {"Bearbeiter": "Max Mustermann"}
 
 
 def test_dms_link_uses_example_format(monkeypatch):
