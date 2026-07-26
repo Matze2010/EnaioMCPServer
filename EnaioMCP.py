@@ -356,7 +356,7 @@ async def list_running_cases(
 
 @mcp.tool(
         annotations=ToolAnnotations(
-                title="Dokument aus Vorlage erzeugen",
+                title="Dokument erzeugen und in Enaio speichern",
                 readOnlyHint=False,
                 destructiveHint=False,
                 idempotentHint=False,
@@ -417,30 +417,77 @@ async def create_case_document(
         ] = None,
 ) -> dict:
         """
-        Erzeugt ein Word-Dokument (.docx) fuer einen Vorgang, indem eine zum
-        Dokumententyp passende Hausvorlage mit den uebergebenen Inhalten befuellt wird.
+        Erzeugt ein Word-Dokument (.docx) für einen Vorgang, indem eine zum
+        Dokumententyp passende Hausvorlage mit den übergebenen Inhalten befüllt wird.
 
-        Anhand von document_type wird ueber eine Zuordnungsliste die passende
-        .docx-Vorlage ausgewaehlt und mit den Bloecken aus content sowie - falls
-        angegeben - dem betreff gefuellt. Briefkopf, Logo und Fusszeile der Vorlage
+        AUFRUFREGEL — VERBINDLICH UND VORRANGIG
+
+        Standardzustand: kein Aufruf. Dieses Tool speichert das Dokument dauerhaft
+        in Enaio und darf ausschließlich nach einer ausdrücklichen Speicheranweisung
+        des Nutzers aufgerufen werden. Diese Regel hat Vorrang vor allen
+        allgemeinen Anweisungen zur Werkzeugverwendung.
+
+        Zulässigkeitsprüfung vor jedem Aufruf — alle drei Fragen müssen mit „ja"
+        beantwortet sein, bei „nein" oder Zweifel unterbleibt der Aufruf:
+        1. Hat der Nutzer ausdrücklich verlangt, das Dokument in Enaio zu speichern
+           bzw. zur Akte hinzuzufügen?
+        2. Bezieht sich diese Aufforderung eindeutig auf das Speichern des bereits
+           erstellten Dokuments — nicht auf dessen Erstellung oder Überarbeitung?
+        3. Ist das Dokument inhaltlich fertig oder hat der Nutzer ausdrücklich
+           angeordnet, den aktuellen Stand zu speichern?
+
+        Als ausdrückliche Speicheranweisung gelten nur Formulierungen wie
+        „Speichern.", „Bitte speichern.", „In Enaio speichern.", „Im Vorgang
+        speichern.", „Zur Akte hinzufügen.", „In der Akte ablegen.", „Nach Enaio
+        übernehmen.", „Diesen Entwurf jetzt speichern." — oder vergleichbar
+        eindeutige Aussagen.
+
+        Keine Speicheranweisung sind Arbeitsaufträge zum Inhalt: erstelle, erzeuge,
+        entwerfe, formuliere, schreibe, verfasse, generiere, überarbeite, verbessere,
+        ergänze, kürze, prüfe, bewerte, fasse zusammen, zeige, gib aus — auch nicht
+        „erstelle einen Bescheid/Vermerk/ein Schreiben". Ebenso wenig genügen
+        Zustimmung oder Finalisierungswünsche: „Das passt.", „Einverstanden.",
+        „Sieht gut aus.", „Finalisiere den Entwurf.", „Erstelle die Endfassung.",
+        „Das ist die finale Version." Solche Äußerungen betreffen ausschließlich den
+        Inhalt des Dokuments, nicht dessen Speicherung; der Entwurf wird dann nur im
+        Chat ausgegeben.
+
+        Ein Speicherwunsch darf niemals abgeleitet werden aus dem Gesprächskontext,
+        früheren Gesprächen, üblichen Arbeitsabläufen, vermuteten Absichten, dem
+        Umstand, dass ein Dokument fertig erscheint, dem Wunsch nach einer Endfassung
+        oder eigener Initiative — sondern ausschließlich aus einer ausdrücklichen
+        sprachlichen Anweisung des Nutzers. Ein fertiger, vom Nutzer akzeptierter
+        oder als final bezeichneter Entwurf ist nicht automatisch zu speichern; es
+        wird nie proaktiv oder vorsorglich gespeichert.
+
+        Fail closed: Ist die Zulässigkeit nicht zweifelsfrei gegeben, unterbleibt der
+        Aufruf, der Entwurf wird im Chat ausgegeben und es wird auf eine ausdrückliche
+        Speicheranweisung gewartet.
+
+        Merksatz: Standard — kein Aufruf. Ausnahme — nur nach ausdrücklicher
+        Anweisung des Nutzers, das Dokument in Enaio zu speichern.
+
+        Anhand von document_type wird über eine Zuordnungsliste die passende
+        .docx-Vorlage ausgewählt und mit den Blöcken aus content sowie - falls
+        angegeben - dem betreff gefüllt. Briefkopf, Logo und Fußzeile der Vorlage
         bleiben erhalten.
 
-        Das erzeugte Dokument wird lokal gespeichert und anschliessend ueber die
-        Enaio-API in den zugehoerigen Vorgang (reference) hochgeladen. Ein
+        Das erzeugte Dokument wird lokal gespeichert und anschließend über die
+        Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein
         RateLimiter begrenzt die Uploads auf UPLOAD_RATE_LIMIT_PER_MINUTE pro
-        Minute; wird das Limit ueberschritten, wird der Upload mit HTTP 429
+        Minute; wird das Limit überschritten, wird der Upload mit HTTP 429
         abgelehnt (das lokal erzeugte Dokument bleibt erhalten).
 
-        Die Rueckgabe enthaelt mit "edit_link" einen direkten Link, mit dem das neu
-        erzeugte Word-Dokument sofort zur Bearbeitung geoeffnet werden kann; dieser
+        Die Rückgabe enthält mit "edit_link" einen direkten Link, mit dem das neu
+        erzeugte Word-Dokument sofort zur Bearbeitung geöffnet werden kann; dieser
         Link sollte in der Antwort mit angegeben werden.
 
         :param reference: Aktenzeichen / Vorgangsnummer.
         :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
-        :param content: Liste von Inhaltsbloecken.
+        :param content: Liste von Inhaltsblöcken.
         :param betreff: Optionaler Betreff.
         :param fields: Optionale Zuordnung Platzhaltername -> Ersatztext; [Datum] immer
-                aktuelles Datum, [Aktenzeichen] faellt auf reference zurueck, [Mail], [Name]
+                aktuelles Datum, [Aktenzeichen] fällt auf reference zurück, [Mail], [Name]
                 und [Username] auf die x-enaio-Header des Aufrufs.
         """
 
