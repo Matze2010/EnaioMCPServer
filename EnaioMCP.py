@@ -336,9 +336,6 @@ async def get_case_metadata_session(
         Zusätzlich liefert "dms_link" einen direkten Link, mit dem der Vorgang im
         Enaio-Web-Client geöffnet werden kann; dieser Link sollte in der Antwort
         mit angegeben werden.
-
-        :param reference: Aktenzeichen des Vorgangs (Pflichtformat siehe oben).
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         await ctx.info("Suche nach Vorgangsinformationen in ENAIO")
@@ -415,9 +412,6 @@ async def list_running_cases_session(
         'dms_link' einen direkten Link, mit dem der Vorgang im Enaio-Web-Client
         geöffnet werden kann; dieser Link sollte in der Antwort mit angegeben
         werden.
-
-        :param user: Benutzerkürzel des Aktenverantwortlichen.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         await ctx.info(f"Suche laufende Vorgänge von {user} in ENAIO")
@@ -735,15 +729,6 @@ async def create_case_document_session(
         Standard: Kein Toolaufruf.
         Ausnahme: Nur nach einer ausdrücklichen Anweisung des Nutzers, das Dokument
         in Enaio zu speichern.
-
-        :param reference: Aktenzeichen / Vorgangsnummer.
-        :param document_type: Dokumententyp (z. B. 'Vermerk', 'Brief').
-        :param content: Liste von Inhaltsblöcken.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
-        :param betreff: Optionaler Betreff.
-        :param fields: Optionale Zuordnung Platzhaltername -> Ersatztext; [Datum] immer
-                aktuelles Datum, [Aktenzeichen] fällt auf reference zurück, [Mail], [Name]
-                und [Username] auf die x-enaio-Header des Aufrufs.
         """
 
         template_name, template_path = _resolve_template(document_type)
@@ -916,9 +901,6 @@ async def access_document_fulltext_session(
         Verwende dieses Tool (nicht download_document), wenn der Inhalt gelesen,
         zitiert oder ausgewertet werden soll. Wenn stattdessen die Originaldatei
         (z. B. als Anhang oder zum Download) benötigt wird, nutze download_document.
-
-        :param document: Dokument-ID.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         return await _load_document_content(document, "text", SessionID, ctx)
@@ -967,9 +949,6 @@ async def download_document_session(
 
         Verwende dieses Tool (nicht access_document_fulltext), wenn die Originaldatei
         selbst benötigt wird, nicht nur ihr Textinhalt.
-
-        :param document: Dokument-ID.
-        :param SessionID: Enaio SessionID des aufrufenden Clients.
         """
 
         content = await _load_document_content(document, "file", SessionID, ctx)
