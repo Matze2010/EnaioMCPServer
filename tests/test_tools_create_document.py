@@ -1,6 +1,7 @@
 """Tests fuer das Tool ``create_case_document``."""
 
 import pytest
+from fastapi import HTTPException
 from pydantic import TypeAdapter
 from pydantic import ValidationError
 
@@ -84,6 +85,67 @@ async def test_create_case_document_without_link_when_object_id_missing(stubbed_
 
     assert result["enaio_object_id"] is None
     assert "edit_link" not in result
+
+
+async def test_get_document_fields_returns_brief_fields(monkeypatch, tmp_path):
+    monkeypatch.setattr(EnaioMCP, "ASSETS_DIR", tmp_path)
+    (tmp_path / "Vorlage_Brief.docx").write_bytes(b"PK")
+
+    result = await EnaioMCP.get_document_fields("Brief")
+
+    assert result == {
+        "document_type": "Brief",
+        "template": "Vorlage_Brief.docx",
+        "fields": [
+            {
+                "name": "Adressat",
+                "description": (
+                    "Name bzw. Bezeichnung der adressierten Person, Stelle oder "
+                    "Organisation; nur mit bekannten Angaben befuellen."
+                ),
+            }
+        ],
+    }
+
+
+async def test_get_document_fields_returns_empty_vermerk_fields(monkeypatch, tmp_path):
+    monkeypatch.setattr(EnaioMCP, "ASSETS_DIR", tmp_path)
+    (tmp_path / "Vorlage_Vermerk.docx").write_bytes(b"PK")
+
+    result = await EnaioMCP.get_document_fields("Vermerk")
+
+    assert result == {
+        "document_type": "Vermerk",
+        "template": "Vorlage_Vermerk.docx",
+        "fields": [],
+    }
+
+
+async def test_get_document_fields_resolves_document_type_case_insensitive(monkeypatch, tmp_path):
+    monkeypatch.setattr(EnaioMCP, "ASSETS_DIR", tmp_path)
+    (tmp_path / "Vorlage_Brief.docx").write_bytes(b"PK")
+
+    result = await EnaioMCP.get_document_fields("  BRIEF ")
+
+    assert result["document_type"] == "Brief"
+    assert result["template"] == "Vorlage_Brief.docx"
+    assert result["fields"][0]["name"] == "Adressat"
+
+
+async def test_get_document_fields_unknown_type_raises_400():
+    with pytest.raises(HTTPException) as excinfo:
+        await EnaioMCP.get_document_fields("Gutachten")
+
+    assert excinfo.value.status_code == 400
+    assert "Unbekannter Dokumententyp" in excinfo.value.detail
+
+
+async def test_get_document_fields_is_marked_read_only():
+    tool = await EnaioMCP.mcp.get_tool("get_document_fields")
+
+    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.destructiveHint is False
+    assert tool.annotations.idempotentHint is True
 
 
 async def test_guardrail_reaches_the_client():

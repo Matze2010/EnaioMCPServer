@@ -11,6 +11,7 @@ SESSION_ID_REQUIRED_MESSAGE = (
     "Eine Enaio SessionID ist Voraussetzung für die Nutzung dieses Tools. "
     "Bitte übergeben Sie den Parameter SessionID."
 )
+SESSION_ID_EXEMPT_TOOLS = frozenset({"get_document_fields"})
 
 
 def has_usable_session_id(arguments: dict | None) -> bool:
@@ -31,6 +32,10 @@ class EnaioSessionIDMiddleware(Middleware):
     """Bricht Session-Tool-Aufrufe ohne nutzbare ``SessionID`` vor der Ausfuehrung ab."""
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: CallNext):
+        tool_name = getattr(context.message, "name", None)
+        if tool_name in SESSION_ID_EXEMPT_TOOLS:
+            return await call_next(context)
+
         arguments = getattr(context.message, "arguments", None)
         if not has_usable_session_id(arguments):
             raise ToolError(SESSION_ID_REQUIRED_MESSAGE)

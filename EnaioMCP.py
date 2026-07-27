@@ -83,8 +83,25 @@ upload_limiter = RateLimiter(UPLOAD_RATE_LIMIT_PER_MINUTE)
 # Vorlagen einheitlich ueber den Platzhalter [Betreff] gesetzt (siehe vorlage.py). Der
 # Lookup erfolgt case-insensitive ueber den Schluessel.
 DOCUMENT_TEMPLATES = {
-        "vermerk": {"template": "Vorlage_Vermerk.docx"},
-        "brief": {"template": "Vorlage_Brief.docx"},
+        "vermerk": {
+                "document_type": "Vermerk",
+                "template": "Vorlage_Vermerk.docx",
+                "fields": [],
+        },
+        "brief": {
+                "document_type": "Brief",
+                "template": "Vorlage_Brief.docx",
+                "fields": [
+                        {
+                                "name": "Adressat",
+                                "description": (
+                                        "Name bzw. Bezeichnung der adressierten Person, "
+                                        "Stelle oder Organisation; nur mit bekannten "
+                                        "Angaben befuellen."
+                                ),
+                        },
+                ],
+        },
 }
 
 CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION = (
@@ -288,6 +305,20 @@ def _resolve_template(document_type: str):
         return template_name, template_path
 
 
+def _document_field_metadata(document_type: str) -> dict:
+        """Liefert die manuell befuellbaren fields-Platzhalter eines Dokumententyps."""
+
+        template_name, _ = _resolve_template(document_type)
+        type_key = (document_type or "").strip().lower()
+        mapping = DOCUMENT_TEMPLATES[type_key]
+
+        return {
+                "document_type": mapping["document_type"],
+                "template": template_name,
+                "fields": [dict(field) for field in mapping.get("fields", [])],
+        }
+
+
 def _output_path(document_type: str, betreff: Optional[str]):
         """Baut Zielpfad und Dateinamen des zu erzeugenden Dokuments.
 
@@ -380,8 +411,9 @@ async def _load_document_content(
 
 
 AUTH_INSTRUCTIONS = (
-        "Alle Tools setzen voraus, dass der "
+        "Alle Tools mit Enaio-API-Zugriff setzen voraus, dass der "
         "Caller den Parameter SessionID mit einer Enaio SessionID uebergibt. "
+        "Das Tool get_document_fields ist davon ausgenommen. "
         if AUTH_MODE == AUTH_MODE_SESSION
         else
         ""
@@ -578,6 +610,39 @@ async def list_running_cases_basic(
         ctx: Context,
 ) -> dict:
         return await list_running_cases_session(user, None, ctx)
+
+
+@mcp.tool(
+        name="get_document_fields",
+        version=AUTH_MODE,
+        tags={AUTH_TAG_SESSION if AUTH_MODE == AUTH_MODE_SESSION else AUTH_TAG_BASIC},
+        annotations=ToolAnnotations(
+                title="Optionale Dokumentfelder abrufen",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+        ),
+)
+async def get_document_fields(
+        document_type: Annotated[
+                str,
+                "Dokumententyp, dessen manuell befuellbare fields-Platzhalter "
+                "abgerufen werden, z. B. 'Vermerk' oder 'Brief'.",
+        ],
+) -> dict:
+        """
+        Gibt fuer einen Dokumententyp zurueck, welche Platzhalter optional ueber
+        den Parameter fields von create_case_document befuellt werden koennen.
+
+        Die Rueckgabe enthaelt je Feld den Platzhalternamen ohne eckige Klammern
+        sowie eine Beschreibung des erwarteten Inhalts. Technische Platzhalter
+        wie [Body] und [Betreff] sowie automatisch befuellte Platzhalter wie
+        [Datum], [Aktenzeichen] und Angaben aus x-enaio-Headern werden nicht
+        gelistet.
+        """
+
+        return _document_field_metadata(document_type)
 
 
 # destructiveHint=True: Der Aufruf legt ein Dokument dauerhaft im Enaio-Vorgang ab und ist

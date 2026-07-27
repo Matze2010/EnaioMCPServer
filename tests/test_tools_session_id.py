@@ -69,6 +69,20 @@ async def test_session_id_middleware_passes_non_empty_value():
     assert seen == [context]
 
 
+async def test_session_id_middleware_skips_get_document_fields_without_session_id():
+    seen = []
+
+    async def call_next(context):
+        seen.append(context)
+        return "ok"
+
+    context = _context({"document_type": "Brief"}, tool_name="get_document_fields")
+    middleware = EnaioSessionIDMiddleware()
+
+    assert await middleware.on_call_tool(context, call_next) == "ok"
+    assert seen == [context]
+
+
 @pytest.mark.parametrize(
     "tool_name",
     [
@@ -79,15 +93,26 @@ async def test_session_id_middleware_passes_non_empty_value():
         "download_document",
     ],
 )
-async def test_session_id_is_required_in_all_tool_schemas(tool_name):
-    tool = await EnaioMCP.mcp.get_tool(tool_name)
+async def test_session_id_is_required_in_all_tool_schemas(load_enaio_mcp, tool_name):
+    module = load_enaio_mcp("session")
+    tool = await module.mcp.get_tool(tool_name)
 
     assert "SessionID" in tool.parameters["required"]
     assert tool.parameters["properties"]["SessionID"]["description"] == SESSION_ID_DESCRIPTION
 
 
-async def test_resources_are_hidden_in_session_mode():
-    templates = await EnaioMCP.mcp.list_resource_templates()
+async def test_get_document_fields_does_not_require_session_id_in_session_mode(load_enaio_mcp):
+    module = load_enaio_mcp("session")
+    tool = await module.mcp.get_tool("get_document_fields")
+
+    assert tool.version == "session"
+    assert "SessionID" not in tool.parameters.get("required", [])
+    assert "SessionID" not in tool.parameters["properties"]
+
+
+async def test_resources_are_hidden_in_session_mode(load_enaio_mcp):
+    module = load_enaio_mcp("session")
+    templates = await module.mcp.list_resource_templates()
 
     assert templates == []
 
@@ -105,6 +130,15 @@ async def test_resources_are_hidden_in_session_mode():
 async def test_basic_tool_schemas_do_not_include_session_id(load_enaio_mcp, tool_name):
     module = load_enaio_mcp("basic")
     tool = await module.mcp.get_tool(tool_name)
+
+    assert tool.version == "basic"
+    assert "SessionID" not in tool.parameters.get("required", [])
+    assert "SessionID" not in tool.parameters["properties"]
+
+
+async def test_get_document_fields_does_not_require_session_id_in_basic_mode(load_enaio_mcp):
+    module = load_enaio_mcp("basic")
+    tool = await module.mcp.get_tool("get_document_fields")
 
     assert tool.version == "basic"
     assert "SessionID" not in tool.parameters.get("required", [])

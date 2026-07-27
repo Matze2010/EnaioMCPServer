@@ -39,6 +39,21 @@ Logo, Kopf- und Fußzeile erhalten bleiben:
 Die unterstützten Inhaltsblöcke (heading, subheading, para, listitem, table) sind
 in `vorlage.py` dokumentiert.
 
+## Manuell befüllbare `fields`
+
+Das Tool `get_document_fields` gibt je Dokumenttyp zurück, welche Platzhalter
+sinnvoll vor dem Aufruf von `create_case_document` im Parameter `fields`
+befüllt werden können:
+
+| Dokumententyp | Platzhalter | Erwarteter Inhalt |
+|---------------|-------------|-------------------|
+| Brief         | `Adressat`  | Name bzw. Bezeichnung der adressierten Person, Stelle oder Organisation; nur mit bekannten Angaben befüllen. |
+| Vermerk       | —           | Keine manuell zu erfragenden optionalen `fields`-Platzhalter. |
+
+Technische Platzhalter wie `[Body]` und `[Betreff]` sowie automatisch befüllte
+Platzhalter wie `[Datum]`, `[Aktenzeichen]`, `[Name]` oder `[Mail]` erscheinen
+nicht in der Rückgabe von `get_document_fields`.
+
 ## Automatisch befüllte Platzhalter zum Benutzer
 
 Die Identität des Aufrufers kommt über HTTP-Header vom Typ `x-enaio-*` herein

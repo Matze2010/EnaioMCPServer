@@ -3,7 +3,7 @@
 * :class:`EnaioHeaderMiddleware` extrahiert die ``x-enaio-*``-Header des
   eingehenden HTTP-Requests und legt sie im Context-State ab.
 * :class:`EnaioSessionIDMiddleware` erzwingt den Tool-Parameter ``SessionID`` im
-  AuthMode ``session``.
+  AuthMode ``session`` fuer Tools mit Enaio-API-Zugriff.
 * :class:`RequestHeaderLoggingMiddleware` protokolliert alle Header.
 
 Die Registrierung erfolgt in ``EnaioMCP.py`` ueber ``mcp.add_middleware(...)``.
@@ -20,6 +20,7 @@ from .enaio_headers import (
 from .enaio_session import (
     SESSION_ID_ARGUMENT,
     SESSION_ID_DESCRIPTION,
+    SESSION_ID_EXEMPT_TOOLS,
     SESSION_ID_REQUIRED_MESSAGE,
     EnaioSessionIDMiddleware,
     has_usable_session_id,
@@ -34,6 +35,7 @@ __all__ = [
     "RequestHeaderLoggingMiddleware",
     "SESSION_ID_ARGUMENT",
     "SESSION_ID_DESCRIPTION",
+    "SESSION_ID_EXEMPT_TOOLS",
     "SESSION_ID_REQUIRED_MESSAGE",
     "enaio_placeholder_fields",
     "extract_enaio_headers",

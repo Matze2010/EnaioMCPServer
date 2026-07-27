@@ -18,8 +18,8 @@ Die sichtbaren Tool-Schemas haengen vom `AUTH_MODE` ab:
 
 | AuthMode | Tools | Resources |
 |----------|-------|-----------|
-| `session` | Alle Tools verlangen den Pflichtparameter `SessionID`; der Server gibt ihn bei jedem Enaio-API-Aufruf als Cookie `JSESSIONID` weiter. | Nicht verfuegbar |
-| `basic` | Dieselben Toolnamen sind ohne `SessionID` verfuegbar; der Server nutzt `USERNAME`/`PASSWORD` fuer Basic Auth. | Verfuegbar ohne `SessionID` in der URI |
+| `session` | Tools mit Enaio-API-Zugriff verlangen den Pflichtparameter `SessionID`; der Server gibt ihn bei jedem Enaio-API-Aufruf als Cookie `JSESSIONID` weiter. `get_document_fields` kommt ohne `SessionID` aus. | Nicht verfuegbar |
+| `basic` | Dieselben Toolnamen sind ohne `SessionID` verfuegbar; der Server nutzt `USERNAME`/`PASSWORD` fuer Basic Auth. `get_document_fields` bleibt ebenfalls ohne `SessionID`. | Verfuegbar ohne `SessionID` in der URI |
 
 Schlaegt die Authentifizierung im Session-Modus fehl, weist die Antwort darauf
 hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
@@ -28,6 +28,7 @@ hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
 |------|-------|
 | `get_case_metadata` | Metadaten und Dokumentliste zu einem Aktenzeichen; liefert zusätzlich `dms_link` zum Öffnen im Web-Client |
 | `list_running_cases` | Alle laufenden Vorgänge eines Aktenverantwortlichen (Benutzerkürzel), je Treffer mit `reference_nr` und `dms_link` |
+| `get_document_fields` | Listet je Dokumenttyp die optional manuell befüllbaren `fields`-Platzhalter für `create_case_document` |
 | `access_document_fulltext` | Volltext eines Dokuments als Klartext — zum Lesen, Zitieren, Auswerten |
 | `download_document` | Originaldatei eines Dokuments, Base64-kodiert |
 | `create_case_document` | Erzeugt ein `.docx` aus einer Hausvorlage und legt es dauerhaft im Vorgang ab; liefert `edit_link` zum sofortigen Bearbeiten |
@@ -155,6 +156,12 @@ Aufbau der Vorlagen, unterstützte Platzhalter und die Zuordnung Dokumententyp �
 Vorlagendatei sind in [`assets/README.md`](assets/README.md) beschrieben, die
 Inhaltsblöcke (`heading`, `subheading`, `para`, `listitem`, `table`) in
 `vorlage.py`.
+
+Mit `get_document_fields` kann ein Client vor dem Aufruf von
+`create_case_document` abfragen, welche Platzhalter sinnvoll im Parameter
+`fields` befüllt werden können. Technische Platzhalter wie `[Body]` und
+`[Betreff]` sowie automatisch befüllte Platzhalter wie `[Datum]`,
+`[Aktenzeichen]`, `[Name]` oder `[Mail]` werden dort nicht gelistet.
 
 ## Benutzerkontext über `x-enaio-*`-Header
 
