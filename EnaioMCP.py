@@ -578,7 +578,8 @@ async def get_case_metadata_session(
         Aktenzeichen gefragt wird - auch wenn nur eine Vorgangs- oder Fallnummer im
         Text steht, ohne dass explizit das Wort "Aktenzeichen" fällt.
 
-        Rückgabe enthält u.a. Titel, Kategorie, Sachbearbeiter sowie ein
+        Rückgabe enthält u.a. Titel, Kategorie, Sachbearbeiter, das Erstelldatum
+        des Vorgangs ('creationDate') sowie ein
         "documents"-Feld mit allen zugehörigen Dokumenten (inkl. Dokument-ID), die
         mit access_document_fulltext oder download_document abgerufen werden können.
         Zusätzlich liefert "dms_link" einen direkten Link, mit dem der Vorgang im
@@ -656,7 +657,8 @@ async def list_running_cases_session(
 
         Zurückgegeben wird eine kompakte Liste ohne Akteninhalt. Zu jedem Treffer
         liefert 'reference_nr' das Aktenzeichen, mit dem sich über
-        get_case_metadata Details und die Dokumentliste nachladen lassen, sowie
+        get_case_metadata Details und die Dokumentliste nachladen lassen,
+        'creationDate' das Erstelldatum des Vorgangs sowie
         'dms_link' einen direkten Link, mit dem der Vorgang im Enaio-Web-Client
         geöffnet werden kann; dieser Link sollte in der Antwort mit angegeben
         werden.
