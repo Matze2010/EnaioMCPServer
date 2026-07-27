@@ -713,14 +713,6 @@ async def create_case_document_session(
         werden ohne eckige Klammern angegeben, z. B. "Adressat", "PLZ", "Ort",
         "Ansprechpartner", "Abteilung" oder "Anschrift".
 
-        PFLICHT VOR DEM AUFRUF VON create_case_document:
-        Unmittelbar vor create_case_document muss get_document_fields mit dem
-        geplanten document_type aufgerufen werden. Die Rueckgabe von
-        get_document_fields ist zu verwenden, um die fuer diesen document_type
-        relevanten Platzhalter zu ermitteln und fields zu befuellen. Ohne diesen
-        vorherigen get_document_fields-Aufruf darf create_case_document nicht
-        aufgerufen werden.
-
         Das erzeugte Dokument wird lokal gespeichert und anschließend über die
         Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein
         RateLimiter begrenzt die Uploads auf UPLOAD_RATE_LIMIT_PER_MINUTE pro
@@ -756,6 +748,13 @@ async def create_case_document_session(
 
         Insbesondere dürfen weder Eigeninitiative noch Wahrscheinlichkeitsannahmen
         oder übliche Arbeitsabläufe die nachfolgenden Voraussetzungen ersetzen.
+
+        Unmittelbar vor dem Aufruf von create_case_document muss get_document_fields 
+        mit dem geplanten document_type aufgerufen werden. Die Rueckgabe von
+        get_document_fields ist zu verwenden, um die fuer diesen document_type
+        relevanten Platzhalter zu ermitteln und fields zu befuellen. Ohne diesen
+        vorherigen get_document_fields-Aufruf darf create_case_document nicht
+        aufgerufen werden.
 
         ZULÄSSIGKEITSPRÜFUNG
 
