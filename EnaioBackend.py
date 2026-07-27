@@ -299,6 +299,7 @@ class EnaioBackend:
             "reference_nr": akte.property("Aktenzeichen"),
             "title": akte.property("Aktenbezeichnung"),
             "category": akte.property("Kategorisierung"),
+            "creationDate": akte.property("Erstelldatum"),
             "topics": akte.property("Aktenplaneintrag").split("|"),
         }
 
@@ -336,9 +337,9 @@ class EnaioBackend:
         """
 
         objects = await self._search(
-            "SELECT system:objectId, Aktenbezeichnung, Kategorisierung, "
-            "Aktenverantwortlicher, Aktenplaneintrag, Aktenzeichen, Aktentyp, "
-            "Akteninhalt "
+            "SELECT system:objectId, Erstelldatum, Aktenbezeichnung, "
+            "Kategorisierung, Aktenverantwortlicher, Aktenplaneintrag, "
+            "Aktenzeichen, Aktentyp, Akteninhalt "
             "FROM OSTPL_AA "
             "WHERE Aktenzeichen=@aktenzeichen AND Aktentyp=@aktentyp",
             {"aktenzeichen": aktenzeichen, "aktentyp": STANDARD_CASE_TYPE},
@@ -369,8 +370,9 @@ class EnaioBackend:
         """
 
         objects = await self._search(
-            "SELECT system:objectId, Aktenzeichen, Aktenbezeichnung, "
-            "Kategorisierung, Aktenplaneintrag, Aktenstatus, Aktentyp "
+            "SELECT system:objectId, Erstelldatum, Aktenzeichen, "
+            "Aktenbezeichnung, Kategorisierung, Aktenplaneintrag, Aktenstatus, "
+            "Aktentyp "
             "FROM OSTPL_AA "
             "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status "
             "AND Aktentyp=@aktentyp",

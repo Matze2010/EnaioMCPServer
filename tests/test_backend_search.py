@@ -13,6 +13,7 @@ def _akte_object():
     return {
         "properties": {
             "system:objectId": {"value": "PARENT123"},
+            "Erstelldatum": {"value": "2024-01-01"},
             "Aktenzeichen": {"value": "DS.1.2-2024-1234"},
             "Aktenbezeichnung": {"value": "Titel"},
             "Kategorisierung": {"value": "Kategorie"},
@@ -23,10 +24,13 @@ def _akte_object():
     }
 
 
-def _running_case_object(object_id, aktenzeichen, title="Titel", topics="A|B"):
+def _running_case_object(
+    object_id, aktenzeichen, title="Titel", topics="A|B", creation_date="2024-01-01"
+):
     return {
         "properties": {
             "system:objectId": {"value": object_id},
+            "Erstelldatum": {"value": creation_date},
             "Aktenzeichen": {"value": aktenzeichen},
             "Aktenbezeichnung": {"value": title},
             "Kategorisierung": {"value": "Standard"},
@@ -61,7 +65,7 @@ async def test_get_aktenzeichen_returns_record(make_backend):
     assert record["reference_nr"] == "DS.1.2-2024-1234"
     assert record["title"] == "Titel"
     assert record["topics"] == ["A", "B"]
-    assert record["aktentyp"] == "Standardakte"
+    assert record["creationDate"] == "2024-01-01"
 
 
 async def test_search_sends_expected_query_envelope(make_backend):
@@ -80,6 +84,7 @@ async def test_search_sends_expected_query_envelope(make_backend):
         "aktentyp": "Standardakte",
     }
     assert "Aktentyp=@aktentyp" in query["statement"]
+    assert "Erstelldatum" in query["statement"]
     assert query["skipCount"] == 0
     assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
@@ -106,6 +111,7 @@ async def test_get_running_cases_sends_expected_query(make_backend):
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
 
     statement = query["statement"]
+    assert "Erstelldatum" in statement
     assert "FROM OSTPL_AA " in statement
     assert "Aktenverantwortlicher=@user" in statement
     assert "Aktenstatus=@status" in statement
@@ -116,7 +122,13 @@ async def test_get_running_cases_sends_expected_query(make_backend):
 
 async def test_get_running_cases_maps_records(make_backend):
     objects = [
-        _running_case_object("15645", "DS.5.1-2022-577", "Erster Vorgang", "Datenschutz|OWi"),
+        _running_case_object(
+            "15645",
+            "DS.5.1-2022-577",
+            "Erster Vorgang",
+            "Datenschutz|OWi",
+            creation_date="2022-03-04",
+        ),
         _running_case_object("17776", "DS.7.2-2022-695", "Zweiter Vorgang"),
     ]
     backend = make_backend(lambda request: httpx.Response(200, json={"objects": objects}))
@@ -128,7 +140,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "reference_nr": "DS.5.1-2022-577",
             "title": "Erster Vorgang",
             "category": "Standard",
-            "aktentyp": "Standardakte",
+            "creationDate": "2022-03-04",
             "topics": ["Datenschutz", "OWi"],
             "status": "laufend",
             "object_id": "15645",
@@ -137,7 +149,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "reference_nr": "DS.7.2-2022-695",
             "title": "Zweiter Vorgang",
             "category": "Standard",
-            "aktentyp": "Standardakte",
+            "creationDate": "2024-01-01",
             "topics": ["A", "B"],
             "status": "laufend",
             "object_id": "17776",
