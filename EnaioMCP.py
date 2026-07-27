@@ -91,7 +91,13 @@ CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION = (
 )
 
 CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
-        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
+        "Optionale Zuordnung von Platzhaltern zu Ersatztexten. Muss als echtes "
+        "JSON-Objekt uebergeben werden, nicht als String. Also keine zusaetzlichen "
+        "Anfuehrungszeichen um das Objekt und kein vorheriges json.dumps(...). "
+        "Richtig: {\"fields\":{\"Adressat\":\"Ministerium für Bildung\","
+        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\"}}. Falsch: "
+        "{\"fields\":\"{\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
+        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\"}\"}. "
         "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
         "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
         "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
@@ -517,6 +523,9 @@ async def create_case_document_session(
                         "Array und kein vorheriges json.dumps(...). Richtig: "
                         '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
                         '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
+                        "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
+                        "werden, weil sie bereits ueber die Parameter betreff und reference "
+                        "bzw. die Vorlage gesetzt werden. "
                         "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
                         "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
                         '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
@@ -831,6 +840,9 @@ async def create_case_document_basic(
                         "Array und kein vorheriges json.dumps(...). Richtig: "
                         '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
                         '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
+                        "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
+                        "werden, weil sie bereits ueber die Parameter betreff und reference "
+                        "bzw. die Vorlage gesetzt werden. "
                         "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
                         "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
                         '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'

@@ -152,6 +152,17 @@ async def test_optional_document_parameter_annotations_reach_schema():
     assert "JSON-Objekt" in properties["fields"]["description"]
 
 
+async def test_fields_annotation_rejects_json_object_as_string():
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    description = tool.parameters["properties"]["fields"]["description"]
+
+    assert "echtes JSON-Objekt" in description
+    assert "nicht als String" in description
+    assert "json.dumps" in description
+    assert '{"fields":{"Adressat":"Ministerium für Bildung","PLZ":"12345","Ort":"Musterstadt"}}' in description
+    assert '{"fields":"{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"PLZ\\":\\"12345\\",\\"Ort\\":\\"Musterstadt\\"}"}' in description
+
+
 async def test_content_annotation_rejects_json_array_as_string():
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
     description = tool.parameters["properties"]["content"]["description"]
@@ -161,6 +172,16 @@ async def test_content_annotation_rejects_json_array_as_string():
     assert "json.dumps" in description
     assert '{"content":[{"type":"para","text":"Text"}]}' in description
     assert '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}' in description
+
+
+async def test_content_annotation_forbids_repeating_subject_and_reference():
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    description = tool.parameters["properties"]["content"]["description"]
+
+    assert "Betreff" in description
+    assert "Aktenzeichen" in description
+    assert "nicht wiederholt" in description
+    assert "betreff und reference" in description
 
 
 async def test_create_case_document_is_marked_destructive():
