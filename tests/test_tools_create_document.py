@@ -1,6 +1,8 @@
 """Tests fuer das Tool ``create_case_document``."""
 
 import pytest
+from pydantic import TypeAdapter
+from pydantic import ValidationError
 
 import EnaioMCP
 from rate_limiter import RateLimiter
@@ -159,8 +161,36 @@ async def test_fields_annotation_rejects_json_object_as_string():
     assert "echtes JSON-Objekt" in description
     assert "nicht als String" in description
     assert "json.dumps" in description
-    assert '{"fields":{"Adressat":"Ministerium für Bildung","PLZ":"12345","Ort":"Musterstadt"}}' in description
-    assert '{"fields":"{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"PLZ\\":\\"12345\\",\\"Ort\\":\\"Musterstadt\\"}"}' in description
+    assert '{"Adressat":"Ministerium für Bildung","PLZ":"12345","Ort":"Musterstadt"}' in description
+    assert '{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"PLZ\\":\\"12345\\",\\"Ort\\":\\"Musterstadt\\"}' in description
+
+
+def test_fields_parameter_accepts_json_object_string_before_tool_call_validation():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
+
+    fields = adapter.validate_python(
+        '{"Adressat": "Frau Janina Lubicz", "Abteilung": "Referat D 4", '
+        '"Ansprechpartner": "Janina Lubicz", '
+        '"Anschrift": "Franz-Josef-Roder-Strasse 17", "PLZ": "66119", '
+        '"Ort": "Saarbruecken", "Organisation": "MWIDE"}'
+    )
+
+    assert fields == {
+        "Adressat": "Frau Janina Lubicz",
+        "Abteilung": "Referat D 4",
+        "Ansprechpartner": "Janina Lubicz",
+        "Anschrift": "Franz-Josef-Roder-Strasse 17",
+        "PLZ": "66119",
+        "Ort": "Saarbruecken",
+        "Organisation": "MWIDE",
+    }
+
+
+def test_fields_parameter_rejects_json_array_string_before_tool_call_validation():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
+
+    with pytest.raises(ValidationError, match="fields muss ein JSON-Objekt sein"):
+        adapter.validate_python('[{"Adressat": "Frau Janina Lubicz"}]')
 
 
 async def test_content_annotation_rejects_json_array_as_string():
@@ -172,6 +202,27 @@ async def test_content_annotation_rejects_json_array_as_string():
     assert "json.dumps" in description
     assert '{"content":[{"type":"para","text":"Text"}]}' in description
     assert '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}' in description
+
+
+def test_content_parameter_accepts_json_array_string_before_tool_call_validation():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
+
+    content = adapter.validate_python(
+        '[{"type": "heading", "text": "1. Sachverhalt"}, '
+        '{"type": "para", "text": "Inhalt"}]'
+    )
+
+    assert content == [
+        {"type": "heading", "text": "1. Sachverhalt"},
+        {"type": "para", "text": "Inhalt"},
+    ]
+
+
+def test_content_parameter_rejects_json_object_string_before_tool_call_validation():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
+
+    with pytest.raises(ValidationError, match="content muss ein JSON-Array sein"):
+        adapter.validate_python('{"type": "para", "text": "Inhalt"}')
 
 
 async def test_content_annotation_forbids_repeating_subject_and_reference():

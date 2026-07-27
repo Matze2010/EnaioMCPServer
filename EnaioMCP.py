@@ -1,6 +1,7 @@
 import os
 import re
 import base64
+import json
 
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 
 from fastmcp import FastMCP, Context
 from fastmcp.tools.tool import ToolAnnotations
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 from typing import Annotated, List, Optional
 from fastapi import HTTPException
 
@@ -90,14 +91,42 @@ CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION = (
         "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage."
 )
 
+CREATE_CASE_DOCUMENT_CONTENT_DESCRIPTION = (
+        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
+        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
+        "Array und kein vorheriges json.dumps(...). Richtig: "
+        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
+        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
+        "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
+        "werden, weil sie bereits ueber die Parameter betreff und reference "
+        "bzw. die Vorlage gesetzt werden. "
+        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
+        "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
+        '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
+        '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
+        '- para:       {"type":"para","runs":[{"t":"Fett: ","b":true},{"t":"normaler Text."}],"jc":"both"}\n'
+        '              Kurzform ohne Formatierung: {"type":"para","text":"einfacher Absatz"}\n'
+        '- listitem:   {"type":"listitem","number":1,"text":"nummerierter Punkt"}  '
+        '(ohne "number" bzw. number=null -> Aufzaehlung)\n'
+        '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
+        "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
+        "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
+        "Beispiel: "
+        '[{"type":"heading","text":"1. Sachverhalt"},'
+        '{"type":"subheading","text":"Auflagen"},'
+        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
+        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
+        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
+)
+
 CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
         "Optionale Zuordnung von Platzhaltern zu Ersatztexten. Muss als echtes "
         "JSON-Objekt uebergeben werden, nicht als String. Also keine zusaetzlichen "
         "Anfuehrungszeichen um das Objekt und kein vorheriges json.dumps(...). "
-        "Richtig: {\"fields\":{\"Adressat\":\"Ministerium für Bildung\","
-        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\"}}. Falsch: "
-        "{\"fields\":\"{\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
-        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\"}\"}. "
+        "Richtig: {\"Adressat\":\"Ministerium für Bildung\","
+        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\"}. Falsch: "
+        "{\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
+        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\"}. "
         "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
         "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
         "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
@@ -119,6 +148,68 @@ CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
         "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
         "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
 )
+
+
+def _parse_json_dict_string(value):
+        """Akzeptiert JSON-Objekte auch dann, wenn ein Client sie als String sendet."""
+
+        if value is None or isinstance(value, dict):
+                return value
+
+        if not isinstance(value, str):
+                return value
+
+        text = value.strip()
+        if not text:
+                return None
+
+        try:
+                parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+                raise ValueError("fields muss ein gueltiges JSON-Objekt sein.") from exc
+
+        if not isinstance(parsed, dict):
+                raise ValueError("fields muss ein JSON-Objekt sein.")
+
+        return parsed
+
+
+def _parse_json_list_string(value):
+        """Akzeptiert JSON-Arrays auch dann, wenn ein Client sie als String sendet."""
+
+        if isinstance(value, list):
+                return value
+
+        if not isinstance(value, str):
+                return value
+
+        text = value.strip()
+        if not text:
+                raise ValueError("content muss ein gueltiges JSON-Array sein.")
+
+        try:
+                parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+                raise ValueError("content muss ein gueltiges JSON-Array sein.") from exc
+
+        if not isinstance(parsed, list):
+                raise ValueError("content muss ein JSON-Array sein.")
+
+        return parsed
+
+
+CreateCaseDocumentContent = Annotated[
+        List[dict],
+        BeforeValidator(_parse_json_list_string),
+        Field(description=CREATE_CASE_DOCUMENT_CONTENT_DESCRIPTION),
+]
+
+
+CreateCaseDocumentFields = Annotated[
+        Optional[dict],
+        BeforeValidator(_parse_json_dict_string),
+        Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
+]
 
 
 def _sanitize_filename(text: str) -> str:
@@ -515,46 +606,14 @@ async def create_case_document_session(
                 str,
                 "Dokumententyp, der die zu verwendende Vorlage bestimmt, z. B. 'Vermerk' oder 'Brief'.",
         ],
-        content: Annotated[
-                List[dict],
-                (
-                        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
-                        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
-                        "Array und kein vorheriges json.dumps(...). Richtig: "
-                        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
-                        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
-                        "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
-                        "werden, weil sie bereits ueber die Parameter betreff und reference "
-                        "bzw. die Vorlage gesetzt werden. "
-                        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
-                        "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
-                        '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
-                        '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
-                        '- para:       {"type":"para","runs":[{"t":"Fett: ","b":true},{"t":"normaler Text."}],"jc":"both"}\n'
-                        '              Kurzform ohne Formatierung: {"type":"para","text":"einfacher Absatz"}\n'
-                        '- listitem:   {"type":"listitem","number":1,"text":"nummerierter Punkt"}  '
-                        '(ohne "number" bzw. number=null -> Aufzaehlung)\n'
-                        '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
-                        "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
-                        "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
-                        "Beispiel: "
-                        '[{"type":"heading","text":"1. Sachverhalt"},'
-                        '{"type":"subheading","text":"Auflagen"},'
-                        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
-                        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
-                        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
-                ),
-        ],
+        content: CreateCaseDocumentContent,
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
         betreff: Annotated[
                 Optional[str],
                 Field(description=CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION),
         ] = None,
-        fields: Annotated[
-                Optional[dict],
-                Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
-        ] = None,
+        fields: CreateCaseDocumentFields = None,
 ) -> dict:
         """
         Erzeugt ein Word-Dokument (.docx) für einen Vorgang, indem eine zum
@@ -832,45 +891,13 @@ async def create_case_document_basic(
                 str,
                 "Dokumententyp, der die zu verwendende Vorlage bestimmt, z. B. 'Vermerk' oder 'Brief'.",
         ],
-        content: Annotated[
-                List[dict],
-                (
-                        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
-                        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
-                        "Array und kein vorheriges json.dumps(...). Richtig: "
-                        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
-                        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
-                        "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
-                        "werden, weil sie bereits ueber die Parameter betreff und reference "
-                        "bzw. die Vorlage gesetzt werden. "
-                        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
-                        "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
-                        '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
-                        '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
-                        '- para:       {"type":"para","runs":[{"t":"Fett: ","b":true},{"t":"normaler Text."}],"jc":"both"}\n'
-                        '              Kurzform ohne Formatierung: {"type":"para","text":"einfacher Absatz"}\n'
-                        '- listitem:   {"type":"listitem","number":1,"text":"nummerierter Punkt"}  '
-                        '(ohne "number" bzw. number=null -> Aufzaehlung)\n'
-                        '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
-                        "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
-                        "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
-                        "Beispiel: "
-                        '[{"type":"heading","text":"1. Sachverhalt"},'
-                        '{"type":"subheading","text":"Auflagen"},'
-                        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
-                        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
-                        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
-                ),
-        ],
+        content: CreateCaseDocumentContent,
         ctx: Context,
         betreff: Annotated[
                 Optional[str],
                 Field(description=CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION),
         ] = None,
-        fields: Annotated[
-                Optional[dict],
-                Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
-        ] = None,
+        fields: CreateCaseDocumentFields = None,
 ) -> dict:
         return await create_case_document_session(
                 reference,
