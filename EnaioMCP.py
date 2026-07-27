@@ -152,6 +152,9 @@ CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
         "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
         "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
         "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
+        "Vor dem Aufruf von create_case_document soll versucht werden, mit "
+        "get_document_fields die fuer den jeweiligen document_type relevanten "
+        "Platzhalter zu ermitteln und fields anhand dieser Rueckgabe zu befuellen. "
         "Beim Erstellen von Entwuerfen fuer Briefe oder sonstige Schreiben sind "
         "sämtliche bekannten Angaben zum Adressaten zu uebergeben. Dies umfasst "
         "insbesondere Name, Bearbeiter, Organisation, Abteilung, Anschrift, "
@@ -705,6 +708,10 @@ async def create_case_document_session(
         fields ist ein optionales JSON-Objekt mit Platzhalterwerten. Die Schlüssel
         werden ohne eckige Klammern angegeben, z. B. "Adressat", "PLZ", "Ort",
         "Ansprechpartner", "Abteilung" oder "Anschrift".
+
+        Vor dem Aufruf soll versucht werden, mit get_document_fields die fuer
+        den jeweiligen document_type relevanten Platzhalter zu ermitteln und
+        fields anhand dieser Rueckgabe zu befuellen.
 
         Das erzeugte Dokument wird lokal gespeichert und anschließend über die
         Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein

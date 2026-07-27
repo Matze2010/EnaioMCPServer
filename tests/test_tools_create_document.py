@@ -159,6 +159,8 @@ async def test_guardrail_reaches_the_client():
         "OPTIONALE PARAMETER",
         "betreff ist ein optionaler Betreff",
         "fields ist ein optionales JSON-Objekt",
+        "get_document_fields",
+        "relevanten Platzhalter",
         "KERNREGEL",
         "ZULÄSSIGKEITSPRÜFUNG",
         "WAS ALS AUSDRÜCKLICHE SPEICHERANWEISUNG GILT",
@@ -199,6 +201,9 @@ async def test_fields_annotation_mentions_common_placeholders():
         "ausschließlich",
         "nicht zu ergänzen",
         "nicht zu fingieren",
+        "get_document_fields",
+        "relevanten",
+        "document_type",
     ):
         assert marker in description
 
