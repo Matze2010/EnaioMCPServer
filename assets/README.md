@@ -37,18 +37,29 @@ Logo, Kopf- und Fußzeile erhalten bleiben:
   bleiben unverändert stehen.
 
 Die unterstützten Inhaltsblöcke (heading, subheading, para, listitem, table) sind
-in `vorlage.py` dokumentiert.
+in `vorlage.py` dokumentiert. Das Tool nimmt sie im Parameter `content` als
+JSON-String entgegen, also als String, der das JSON-Array der Blöcke enthält.
 
 ## Manuell befüllbare `fields`
 
 Das Tool `get_document_fields` gibt je Dokumenttyp zurück, welche Platzhalter
 sinnvoll vor dem Aufruf von `create_case_document` im Parameter `fields`
-befüllt werden können:
+befüllt werden können. `fields` wird dabei als JSON-String übergeben, also als
+String, der ein JSON-Objekt enthält (z. B.
+`"{\"Adressat\":\"Ministerium für Bildung\",\"Ort\":\"Musterstadt\"}"`).
 
 | Dokumententyp | Platzhalter | Erwarteter Inhalt |
 |---------------|-------------|-------------------|
-| Brief         | `Adressat`  | Name bzw. Bezeichnung der adressierten Person, Stelle oder Organisation; nur mit bekannten Angaben befüllen. |
+| Brief         | `Adressat`  | Name bzw. Bezeichnung der adressierten Person, Stelle oder Organisation. |
+| Brief         | `Anschrift` | Anschrift der adressierten Person, Stelle oder Organisation. |
+| Brief         | `PLZ`       | Postleitzahl der adressierten Person, Stelle oder Organisation. |
+| Brief         | `Ort`       | Ort der adressierten Person, Stelle oder Organisation. |
+| Brief         | `Bearbeiter` | Name des Verfassers / Bearbeiters des Dokuments. |
+| Brief         | `Durchwahl` | Durchwahl des Verfassers / Bearbeiters des Dokuments. |
+| Brief         | `Email`     | E-Mail-Adresse des Verfassers / Bearbeiters des Dokuments. |
 | Vermerk       | —           | Keine manuell zu erfragenden optionalen `fields`-Platzhalter. |
+
+Nur bekannte Angaben befüllen; fehlende Angaben werden nicht ergänzt.
 
 Technische Platzhalter wie `[Body]` und `[Betreff]` sowie automatisch befüllte
 Platzhalter wie `[Datum]`, `[Aktenzeichen]`, `[Name]` oder `[Mail]` erscheinen

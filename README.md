@@ -157,6 +157,20 @@ Vorlagendatei sind in [`assets/README.md`](assets/README.md) beschrieben, die
 Inhaltsblöcke (`heading`, `subheading`, `para`, `listitem`, `table`) in
 `vorlage.py`.
 
+Die Parameter `content` und `fields` werden als **JSON-String** übergeben, also
+als String, der ein JSON-Array bzw. ein JSON-Objekt enthält — genau die Form, die
+LLM-Clients in der Praxis liefern. Der Server parst den String selbst; nativ
+übergebene Arrays/Objekte werden aus Kompatibilitätsgründen weiterhin akzeptiert.
+
+```json
+{
+  "reference": "DS.1.2-2024-1234",
+  "document_type": "Brief",
+  "content": "[{\"type\":\"para\",\"text\":\"Absatztext\"}]",
+  "fields": "{\"Adressat\":\"Ministerium für Bildung\",\"Ort\":\"Musterstadt\"}"
+}
+```
+
 Mit `get_document_fields` kann ein Client vor dem Aufruf von
 `create_case_document` abfragen, welche Platzhalter sinnvoll im Parameter
 `fields` befüllt werden können. Technische Platzhalter wie `[Body]` und

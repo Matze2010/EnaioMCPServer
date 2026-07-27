@@ -1,5 +1,7 @@
 """Tests fuer das Tool ``create_case_document``."""
 
+import json
+
 import pytest
 from fastapi import HTTPException
 from pydantic import TypeAdapter
@@ -29,8 +31,12 @@ def stubbed_document(monkeypatch, tmp_path):
     monkeypatch.setattr(EnaioMCP, "upload_limiter", RateLimiter(10))
     (tmp_path / "Vorlage_Vermerk.docx").write_bytes(b"PK")
 
+    rendered = {}
+
     def fake_render(template_path, content, out_path, betreff, fields):
         # Datei wirklich anlegen, damit _discard_temp_file sie loeschen kann.
+        rendered["content"] = content
+        rendered["fields"] = fields
         out_path.write_bytes(b"PK")
         return out_path
 
@@ -49,6 +55,10 @@ def stubbed_document(monkeypatch, tmp_path):
             return {"objectId": object_id, "reference_nr": reference}
 
         monkeypatch.setattr(EnaioMCP.backend, "upload_document", fake_upload)
+
+    # Die an _render_document durchgereichten Werte haengen am Setter, damit Tests
+    # pruefen koennen, dass aus den JSON-Strings echte Listen/Dicts werden.
+    set_object_id.rendered = rendered
 
     return set_object_id
 
@@ -87,25 +97,67 @@ async def test_create_case_document_without_link_when_object_id_missing(stubbed_
     assert "edit_link" not in result
 
 
+async def test_create_case_document_parses_json_string_parameters(stubbed_document):
+    stubbed_document("305821")
+
+    result = await EnaioMCP.create_case_document_session(
+        "DS.1.2-2024-1234",
+        "Vermerk",
+        '[{"type": "heading", "text": "1. Sachverhalt"}, '
+        '{"type": "para", "text": "Inhalt"}]',
+        "SESSION-1",
+        _Ctx(),
+        fields='{"Adressat": "Ministerium fuer Bildung"}',
+    )
+
+    rendered = stubbed_document.rendered
+    assert rendered["content"] == [
+        {"type": "heading", "text": "1. Sachverhalt"},
+        {"type": "para", "text": "Inhalt"},
+    ]
+    assert rendered["fields"]["Adressat"] == "Ministerium fuer Bildung"
+    assert result["blocks"] == 2
+
+
+async def test_create_case_document_still_accepts_native_content(stubbed_document):
+    # Rueckwaertskompatibel: Clients, die weiterhin echte Listen/Objekte senden.
+    stubbed_document("305821")
+
+    result = await EnaioMCP.create_case_document_session(
+        "DS.1.2-2024-1234",
+        "Vermerk",
+        [{"type": "para", "text": "Inhalt"}],
+        "SESSION-1",
+        _Ctx(),
+        fields={"Adressat": "Ministerium fuer Bildung"},
+    )
+
+    rendered = stubbed_document.rendered
+    assert rendered["content"] == [{"type": "para", "text": "Inhalt"}]
+    assert rendered["fields"]["Adressat"] == "Ministerium fuer Bildung"
+    assert result["blocks"] == 1
+
+
 async def test_get_document_fields_returns_brief_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(EnaioMCP, "ASSETS_DIR", tmp_path)
     (tmp_path / "Vorlage_Brief.docx").write_bytes(b"PK")
 
     result = await EnaioMCP.get_document_fields("Brief")
 
-    assert result == {
-        "document_type": "Brief",
-        "template": "Vorlage_Brief.docx",
-        "fields": [
-            {
-                "name": "Adressat",
-                "description": (
-                    "Name bzw. Bezeichnung der adressierten Person, Stelle oder "
-                    "Organisation; nur mit bekannten Angaben befuellen."
-                ),
-            }
-        ],
-    }
+    assert result["document_type"] == "Brief"
+    assert result["template"] == "Vorlage_Brief.docx"
+    assert [field["name"] for field in result["fields"]] == [
+        "Adressat",
+        "Anschrift",
+        "PLZ",
+        "Ort",
+        "Bearbeiter",
+        "Durchwahl",
+        "Email",
+    ]
+    assert result["fields"][0]["description"] == (
+        "Name bzw. Bezeichnung der adressierten Person, Stelle oder Organisation."
+    )
 
 
 async def test_get_document_fields_returns_empty_vermerk_fields(monkeypatch, tmp_path):
@@ -156,10 +208,12 @@ async def test_guardrail_reaches_the_client():
     description = tool.description
 
     for marker in (
+        "PARAMETERFORMAT",
+        "content und fields werden als JSON-String übergeben",
         "OPTIONALE PARAMETER",
         "betreff ist ein optionaler Betreff",
-        "fields ist ein optionales JSON-Objekt",
-        "PFLICHT VOR DEM AUFRUF",
+        "fields ist ein optionaler JSON-String",
+        "VERBINDLICHE VORPRÜFUNG",
         "get_document_fields",
         "muss get_document_fields",
         "darf create_case_document nicht",
@@ -227,75 +281,125 @@ async def test_optional_document_parameter_annotations_reach_schema():
     assert "JSON-Objekt" in properties["fields"]["description"]
 
 
-async def test_fields_annotation_rejects_json_object_as_string():
+async def test_fields_annotation_requires_json_string():
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
     description = tool.parameters["properties"]["fields"]["description"]
 
-    assert "echtes JSON-Objekt" in description
-    assert "nicht als String" in description
+    assert "JSON-String" in description
+    assert "nicht als echtes JSON-Objekt" in description
     assert "json.dumps" in description
+    # Richtig ist der serialisierte String, falsch das echte Objekt.
+    assert '"{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"PLZ\\":\\"12345\\",\\"Ort\\":\\"Musterstadt\\"}"' in description
     assert '{"Adressat":"Ministerium für Bildung","PLZ":"12345","Ort":"Musterstadt"}' in description
-    assert '{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"PLZ\\":\\"12345\\",\\"Ort\\":\\"Musterstadt\\"}' in description
 
 
-def test_fields_parameter_accepts_json_object_string_before_tool_call_validation():
+def test_fields_parameter_keeps_json_object_string():
     adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
 
-    fields = adapter.validate_python(
+    raw = (
         '{"Adressat": "Frau Janina Lubicz", "Abteilung": "Referat D 4", '
         '"Ansprechpartner": "Janina Lubicz", '
         '"Anschrift": "Franz-Josef-Roder-Strasse 17", "PLZ": "66119", '
         '"Ort": "Saarbruecken", "Organisation": "MWIDE"}'
     )
 
-    assert fields == {
-        "Adressat": "Frau Janina Lubicz",
-        "Abteilung": "Referat D 4",
-        "Ansprechpartner": "Janina Lubicz",
-        "Anschrift": "Franz-Josef-Roder-Strasse 17",
-        "PLZ": "66119",
-        "Ort": "Saarbruecken",
-        "Organisation": "MWIDE",
-    }
+    assert adapter.validate_python(raw) == raw
 
 
-def test_fields_parameter_rejects_json_array_string_before_tool_call_validation():
+def test_fields_parameter_serialises_native_object_for_backwards_compatibility():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
+
+    validated = adapter.validate_python({"Adressat": "Ministerium für Bildung"})
+
+    assert isinstance(validated, str)
+    assert json.loads(validated) == {"Adressat": "Ministerium für Bildung"}
+
+
+def test_fields_parameter_accepts_none_and_empty_string():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
+
+    assert adapter.validate_python(None) is None
+    assert adapter.validate_python("   ") is None
+
+
+def test_fields_parameter_rejects_json_array_string():
     adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
 
     with pytest.raises(ValidationError, match="fields muss ein JSON-Objekt sein"):
         adapter.validate_python('[{"Adressat": "Frau Janina Lubicz"}]')
 
 
-async def test_content_annotation_rejects_json_array_as_string():
+def test_fields_parameter_rejects_broken_json_string():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentFields)
+
+    with pytest.raises(ValidationError, match="fields muss ein gueltiges JSON-Objekt sein"):
+        adapter.validate_python('{"Adressat": ')
+
+
+async def test_content_annotation_requires_json_string():
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
     description = tool.parameters["properties"]["content"]["description"]
 
-    assert "JSON-Array" in description
-    assert "nicht als String" in description
+    assert "JSON-String" in description
+    assert "nicht als echtes JSON-Array" in description
     assert "json.dumps" in description
-    assert '{"content":[{"type":"para","text":"Text"}]}' in description
+    # Richtig ist der serialisierte String, falsch das echte Array.
     assert '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}' in description
+    assert '{"content":[{"type":"para","text":"Text"}]}' in description
 
 
-def test_content_parameter_accepts_json_array_string_before_tool_call_validation():
+def test_content_parameter_keeps_json_array_string():
     adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
 
-    content = adapter.validate_python(
+    raw = (
         '[{"type": "heading", "text": "1. Sachverhalt"}, '
         '{"type": "para", "text": "Inhalt"}]'
     )
 
-    assert content == [
-        {"type": "heading", "text": "1. Sachverhalt"},
-        {"type": "para", "text": "Inhalt"},
-    ]
+    assert adapter.validate_python(raw) == raw
 
 
-def test_content_parameter_rejects_json_object_string_before_tool_call_validation():
+def test_content_parameter_serialises_native_array_for_backwards_compatibility():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
+
+    validated = adapter.validate_python([{"type": "para", "text": "Inhalt"}])
+
+    assert isinstance(validated, str)
+    assert json.loads(validated) == [{"type": "para", "text": "Inhalt"}]
+
+
+def test_content_parameter_rejects_json_object_string():
     adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
 
     with pytest.raises(ValidationError, match="content muss ein JSON-Array sein"):
         adapter.validate_python('{"type": "para", "text": "Inhalt"}')
+
+
+def test_content_parameter_rejects_empty_and_broken_json_string():
+    adapter = TypeAdapter(EnaioMCP.CreateCaseDocumentContent)
+
+    with pytest.raises(ValidationError, match="content muss ein gueltiges JSON-Array sein"):
+        adapter.validate_python("")
+
+    with pytest.raises(ValidationError, match="content muss ein gueltiges JSON-Array sein"):
+        adapter.validate_python('[{"type": ')
+
+
+async def test_json_parameters_are_declared_as_strings_in_the_schema():
+    # Kern der Aenderung: das Schema verlangt Strings, damit Modelle, die JSON
+    # ohnehin als String senden, nicht mehr an der Validierung scheitern.
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    properties = tool.parameters["properties"]
+
+    assert properties["content"]["type"] == "string"
+
+    fields_schema = properties["fields"]
+    # Optional[str] landet je nach Pydantic-Version als "type" oder als anyOf im Schema.
+    fields_types = {fields_schema.get("type")} | {
+        variant.get("type") for variant in fields_schema.get("anyOf", [])
+    }
+    assert "string" in fields_types
+    assert fields_schema["default"] is None
 
 
 async def test_content_annotation_forbids_repeating_subject_and_reference():

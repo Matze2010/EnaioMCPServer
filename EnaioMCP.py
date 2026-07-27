@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
 from fastmcp.tools.tool import ToolAnnotations
 from pydantic import BeforeValidator, Field
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
 from fastapi import HTTPException
 
 import vorlage
@@ -147,15 +147,15 @@ CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION = (
 )
 
 CREATE_CASE_DOCUMENT_CONTENT_DESCRIPTION = (
-        "Muss als echtes JSON-Array / Liste von Objekten uebergeben werden, "
-        "nicht als String. Also keine zusaetzlichen Anfuehrungszeichen um das "
-        "Array und kein vorheriges json.dumps(...). Richtig: "
-        '{"content":[{"type":"para","text":"Text"}]}. Falsch: '
-        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. '
+        "Muss als JSON-String uebergeben werden, also als ein String, der ein "
+        "JSON-Array von Objekten enthaelt - nicht als echtes JSON-Array. Baue die "
+        "Blockliste auf und uebergib sie serialisiert (json.dumps(...)). Richtig: "
+        '{"content":"[{\\"type\\":\\"para\\",\\"text\\":\\"Text\\"}]"}. Falsch: '
+        '{"content":[{"type":"para","text":"Text"}]}. '
         "Betreff und Aktenzeichen duerfen im Dokumentinhalt nicht wiederholt "
         "werden, weil sie bereits ueber die Parameter betreff und reference "
         "bzw. die Vorlage gesetzt werden. "
-        "Liste von Inhaltsbloecken (JSON-Array), die den Dokumentkoerper bilden. "
+        "Das JSON-Array enthaelt die Inhaltsbloecke, die den Dokumentkoerper bilden. "
         "Jeder Block ist ein Objekt mit dem Feld 'type'. Unterstuetzte Typen:\n"
         '- heading:    {"type":"heading","text":"1. Ueberschrift","size":24}  (size optional, halbe Punkt)\n'
         '- subheading: {"type":"subheading","text":"Zwischenueberschrift"}\n'
@@ -166,29 +166,36 @@ CREATE_CASE_DOCUMENT_CONTENT_DESCRIPTION = (
         '- table:      {"type":"table","header":["Sp1","Sp2"],"rows":[["a","b"],["c","d"]]}\n'
         "Run-Attribute (innerhalb von 'runs'): t (Text, Pflicht), b (fett), i (kursiv), "
         "size (halbe Punkt, z.B. 24), color (Hex ohne #). "
-        "Beispiel: "
-        '[{"type":"heading","text":"1. Sachverhalt"},'
-        '{"type":"subheading","text":"Auflagen"},'
-        '{"type":"para","runs":[{"t":"Wichtig: ","b":true},{"t":"normaler Text."}]},'
-        '{"type":"listitem","number":1,"text":"Erster Punkt"},'
-        '{"type":"table","header":["A","B"],"rows":[["1","2"]]}]'
+        "Beispiel fuer den zu uebergebenden String: "
+        '"[{\\"type\\":\\"heading\\",\\"text\\":\\"1. Sachverhalt\\"},'
+        '{\\"type\\":\\"subheading\\",\\"text\\":\\"Auflagen\\"},'
+        '{\\"type\\":\\"para\\",\\"runs\\":[{\\"t\\":\\"Wichtig: \\",\\"b\\":true},'
+        '{\\"t\\":\\"normaler Text.\\"}]},'
+        '{\\"type\\":\\"listitem\\",\\"number\\":1,\\"text\\":\\"Erster Punkt\\"},'
+        '{\\"type\\":\\"table\\",\\"header\\":[\\"A\\",\\"B\\"],'
+        '\\"rows\\":[[\\"1\\",\\"2\\"]]}]"'
 )
 
 CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
-        "Optionale Zuordnung von Platzhaltern zu Ersatztexten. Muss als echtes "
-        "JSON-Objekt uebergeben werden, nicht als String. Also keine zusaetzlichen "
-        "Anfuehrungszeichen um das Objekt und kein vorheriges json.dumps(...). "
-        "Richtig: {\"Adressat\":\"Ministerium für Bildung\","
-        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\"}. Falsch: "
-        "{\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
-        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\"}. "
+        "Optionale Zuordnung von Platzhaltern zu Ersatztexten. Muss als JSON-String "
+        "uebergeben werden, also als ein String, der ein JSON-Objekt enthaelt - nicht "
+        "als echtes JSON-Objekt. Baue die Zuordnung auf und uebergib sie serialisiert "
+        "(json.dumps(...)). Richtig: "
+        "\"{\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
+        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\"}\". Falsch: "
+        "{\"Adressat\":\"Ministerium für Bildung\","
+        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\"}. "
         "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
         "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
-        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
-        "\"Bearbeiter\":\"Max Mustermann\",\"Adressat\":\"Ministerium für Bildung\","
-        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\",\"Ansprechpartner\":"
-        "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
-        "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
+        "Text. Beispiel fuer den zu uebergebenden String: "
+        "\"{\\\"Aktenzeichen\\\":\\\"DS.1.2-2024-1234\\\","
+        "\\\"Bearbeiter\\\":\\\"Max Mustermann\\\","
+        "\\\"Adressat\\\":\\\"Ministerium für Bildung\\\","
+        "\\\"PLZ\\\":\\\"12345\\\",\\\"Ort\\\":\\\"Musterstadt\\\","
+        "\\\"Ansprechpartner\\\":\\\"Erika Mustermann\\\","
+        "\\\"Abteilung\\\":\\\"Bauamt\\\","
+        "\\\"Anschrift\\\":\\\"Musterstrasse 1\\\"}\". "
+        "Haeufig genutzte Platzhalter sind z.B. "
         "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
         "Pflicht vor create_case_document: Rufe zuerst get_document_fields mit "
         "dem geplanten document_type auf. Befuelle fields anschliessend anhand "
@@ -257,16 +264,54 @@ def _parse_json_list_string(value):
         return parsed
 
 
+def _as_json_array_string(value):
+        """Nimmt content als JSON-String entgegen; echte Listen werden serialisiert."""
+
+        if isinstance(value, list):
+                return json.dumps(value, ensure_ascii=False)
+
+        if not isinstance(value, str):
+                raise ValueError(
+                        "content muss als JSON-String uebergeben werden, der ein JSON-Array enthaelt."
+                )
+
+        # Frueh pruefen, damit der Client den Fehler schon bei der Parametervalidierung
+        # sieht und nicht erst mitten in der Dokumenterzeugung.
+        _parse_json_list_string(value)
+        return value
+
+
+def _as_json_dict_string(value):
+        """Nimmt fields als JSON-String entgegen; echte Objekte werden serialisiert."""
+
+        if value is None:
+                return None
+
+        if isinstance(value, dict):
+                return json.dumps(value, ensure_ascii=False)
+
+        if not isinstance(value, str):
+                raise ValueError(
+                        "fields muss als JSON-String uebergeben werden, der ein JSON-Objekt enthaelt."
+                )
+
+        if not value.strip():
+                return None
+
+        _parse_json_dict_string(value)
+        return value
+
+
 CreateCaseDocumentContent = Annotated[
-        List[dict],
-        BeforeValidator(_parse_json_list_string),
+        str,
+        BeforeValidator(_as_json_array_string),
         Field(description=CREATE_CASE_DOCUMENT_CONTENT_DESCRIPTION),
 ]
 
 
 CreateCaseDocumentFields = Annotated[
-        Optional[dict],
-        BeforeValidator(_parse_json_dict_string),
+        Optional[str],
+        BeforeValidator(_as_json_dict_string),
         Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
 ]
 
@@ -742,14 +787,24 @@ async def create_case_document_session(
         angegeben - dem betreff gefüllt. Briefkopf, Logo und Fußzeile der Vorlage
         bleiben erhalten.
 
+        PARAMETERFORMAT
+
+        content und fields werden als JSON-String übergeben, nicht als echtes
+        JSON-Array bzw. JSON-Objekt. Erzeuge die Struktur und serialisiere sie
+        (json.dumps), bevor du sie übergibst.
+
+        content = "[{\\"type\\":\\"para\\",\\"text\\":\\"Absatztext\\"}]"
+        fields  = "{\\"Adressat\\":\\"Ministerium für Bildung\\",\\"Ort\\":\\"Musterstadt\\"}"
+
         OPTIONALE PARAMETER
 
         betreff ist ein optionaler Betreff und ersetzt die Betreffzeile der
         Vorlage.
 
-        fields ist ein optionales JSON-Objekt mit Platzhalterwerten. Die Schlüssel
-        werden ohne eckige Klammern angegeben, z. B. "Adressat", "PLZ", "Ort",
-        "Ansprechpartner", "Abteilung" oder "Anschrift".
+        fields ist ein optionaler JSON-String, der ein JSON-Objekt mit
+        Platzhalterwerten enthält. Die Schlüssel werden ohne eckige Klammern
+        angegeben, z. B. "Adressat", "PLZ", "Ort", "Ansprechpartner",
+        "Abteilung" oder "Anschrift".
 
         Das erzeugte Dokument wird lokal gespeichert und anschließend über die
         Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein
@@ -932,6 +987,11 @@ async def create_case_document_session(
         in Enaio zu speichern.
         """
 
+        # content und fields kommen als JSON-String herein; die Parse-Helfer reichen
+        # bereits fertige Listen/Dicts unveraendert durch (direkte Python-Aufrufe).
+        content_blocks = _parse_json_list_string(content)
+        field_values = _parse_json_dict_string(fields)
+
         template_name, template_path = _resolve_template(document_type)
 
         await ctx.info(
@@ -944,9 +1004,9 @@ async def create_case_document_session(
         # Platzhalter-Werte aufbereiten: [Aktenzeichen] faellt auf reference zurueck und die
         # Benutzerangaben ([Mail], [Name], ...) auf die x-enaio-Header, jeweils nur wenn nicht
         # ausdruecklich angegeben. [Datum] setzt fill_document stets auf das aktuelle Datum.
-        doc_fields = await _document_fields(reference, fields, ctx)
+        doc_fields = await _document_fields(reference, field_values, ctx)
 
-        written = _render_document(template_path, content, out_path, betreff, doc_fields)
+        written = _render_document(template_path, content_blocks, out_path, betreff, doc_fields)
 
         await ctx.info(f"Dokument lokal gespeichert unter {written}")
 
@@ -972,7 +1032,7 @@ async def create_case_document_session(
                 "document_type": document_type,
                 "betreff": betreff,
                 "template": template_name,
-                "blocks": len(content),
+                "blocks": len(content_blocks),
                 "stored_in_enaio": True,
                 "enaio_object_id": object_id,
         }
