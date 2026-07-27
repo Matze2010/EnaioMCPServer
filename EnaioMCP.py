@@ -100,6 +100,30 @@ DOCUMENT_TEMPLATES = {
                                         "Angaben befuellen."
                                 ),
                         },
+                        {
+                                "name": "Anschrift",
+                                "description": (
+                                        "Anschrift der adressierten Person, "
+                                        "Stelle oder Organisation; nur mit bekannten "
+                                        "Angaben befuellen."
+                                ),
+                        },
+{
+                                "name": "PLZ",
+                                "description": (
+                                        "Postleitzahl der adressierten Person, "
+                                        "Stelle oder Organisation; nur mit bekannten "
+                                        "Angaben befuellen."
+                                ),
+                        },
+{
+                                "name": "Ort",
+                                "description": (
+                                        "Ort der adressierten Person, "
+                                        "Stelle oder Organisation; nur mit bekannten "
+                                        "Angaben befuellen."
+                                ),
+                        }
                 ],
         },
 }
