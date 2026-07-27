@@ -290,7 +290,7 @@ class EnaioBackend:
                 status_code=404, detail=f"{kind} '{identifier}' not found"
             )
         return objects[0]
-
+    
     @staticmethod
     def _case_record(akte):
         """Baut die gemeinsamen Vorgangsfelder aus einem OSTPL_AA-Objekt."""
@@ -299,7 +299,6 @@ class EnaioBackend:
             "reference_nr": akte.property("Aktenzeichen"),
             "title": akte.property("Aktenbezeichnung"),
             "category": akte.property("Kategorisierung"),
-            "aktentyp": akte.property("Aktentyp"),
             "topics": akte.property("Aktenplaneintrag").split("|"),
         }
 
