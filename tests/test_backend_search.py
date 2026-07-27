@@ -13,7 +13,7 @@ def _akte_object():
     return {
         "properties": {
             "system:objectId": {"value": "PARENT123"},
-            "system:creationDate": {"value": "2024-01-01"},
+            "Erstelldatum": {"value": "2024-01-01"},
             "Aktenzeichen": {"value": "DS.1.2-2024-1234"},
             "Aktenbezeichnung": {"value": "Titel"},
             "Kategorisierung": {"value": "Kategorie"},
@@ -30,7 +30,7 @@ def _running_case_object(
     return {
         "properties": {
             "system:objectId": {"value": object_id},
-            "system:creationDate": {"value": creation_date},
+            "Erstelldatum": {"value": creation_date},
             "Aktenzeichen": {"value": aktenzeichen},
             "Aktenbezeichnung": {"value": title},
             "Kategorisierung": {"value": "Standard"},
@@ -84,7 +84,7 @@ async def test_search_sends_expected_query_envelope(make_backend):
         "aktentyp": "Standardakte",
     }
     assert "Aktentyp=@aktentyp" in query["statement"]
-    assert "system:creationDate" in query["statement"]
+    assert "Erstelldatum" in query["statement"]
     assert query["skipCount"] == 0
     assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
@@ -111,7 +111,7 @@ async def test_get_running_cases_sends_expected_query(make_backend):
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
 
     statement = query["statement"]
-    assert "system:creationDate" in statement
+    assert "Erstelldatum" in statement
     assert "FROM OSTPL_AA " in statement
     assert "Aktenverantwortlicher=@user" in statement
     assert "Aktenstatus=@status" in statement

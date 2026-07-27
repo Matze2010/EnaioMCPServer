@@ -14,7 +14,7 @@ def _search_response():
             {
                 "properties": {
                     "system:objectId": {"value": "PARENT123"},
-                    "system:creationDate": {"value": "2024-01-01"},
+                    "Erstelldatum": {"value": "2024-01-01"},
                     "Aktenzeichen": {"value": "DS.1.2-2024-1234"},
                     "Aktenbezeichnung": {"value": "Titel"},
                     "Kategorisierung": {"value": "Kategorie"},
