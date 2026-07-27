@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from fastmcp import FastMCP, Context
 from fastmcp.tools.tool import ToolAnnotations
+from pydantic import Field
 from typing import Annotated, List, Optional
 from fastapi import HTTPException
 
@@ -84,6 +85,34 @@ DOCUMENT_TEMPLATES = {
         "vermerk": {"template": "Vorlage_Vermerk.docx"},
         "brief": {"template": "Vorlage_Brief.docx"},
 }
+
+CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION = (
+        "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage."
+)
+
+CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
+        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
+        "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
+        "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
+        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
+        "\"Bearbeiter\":\"Max Mustermann\",\"Adressat\":\"Ministerium für Bildung\","
+        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\",\"Ansprechpartner\":"
+        "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
+        "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
+        "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
+        "Beim Erstellen von Entwuerfen fuer Briefe oder sonstige Schreiben sind "
+        "sämtliche bekannten Angaben zum Adressaten zu uebergeben. Dies umfasst "
+        "insbesondere Name, Bearbeiter, Organisation, Abteilung, Anschrift, "
+        "Postleitzahl und Ort. Es duerfen ausschließlich die vom Nutzer "
+        "bereitgestellten oder anderweitig verfuegbaren Angaben uebermittelt "
+        "werden; fehlende Angaben sind nicht zu ergänzen und nicht zu fingieren. "
+        "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
+        "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
+        "angegeben - aus 'reference' uebernommen. Die Angaben zum aufrufenden Benutzer "
+        "([Mail], [Name], [Username]) werden - sofern nicht angegeben - automatisch aus "
+        "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
+        "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
+)
 
 
 def _sanitize_filename(text: str) -> str:
@@ -511,33 +540,11 @@ async def create_case_document_session(
         ctx: Context,
         betreff: Annotated[
                 Optional[str],
-                "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage.",
+                Field(description=CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION),
         ] = None,
         fields: Annotated[
                 Optional[dict],
-                (
-                        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
-                        "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
-                        "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
-                        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
-                        "\"Bearbeiter\":\"Max Mustermann\",\"Adressat\":\"Ministerium für Bildung\","
-                        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\",\"Ansprechpartner\":"
-                        "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
-                        "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
-                        "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
-                        "Beim Erstellen von Entwuerfen fuer Briefe oder sonstige Schreiben sind "
-                        "sämtliche bekannten Angaben zum Adressaten zu uebergeben. Dies umfasst "
-                        "insbesondere Name, Bearbeiter, Organisation, Abteilung, Anschrift, "
-                        "Postleitzahl und Ort. Es duerfen ausschließlich die vom Nutzer "
-                        "bereitgestellten oder anderweitig verfuegbaren Angaben uebermittelt "
-                        "werden; fehlende Angaben sind nicht zu ergänzen und nicht zu fingieren. "
-                        "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
-                        "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
-                        "angegeben - aus 'reference' uebernommen. Die Angaben zum aufrufenden Benutzer "
-                        "([Mail], [Name], [Username]) werden - sofern nicht angegeben - automatisch aus "
-                        "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
-                        "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
-                ),
+                Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
         ] = None,
 ) -> dict:
         """
@@ -556,6 +563,15 @@ async def create_case_document_session(
         .docx-Vorlage ausgewählt und mit den Blöcken aus content sowie - falls
         angegeben - dem betreff gefüllt. Briefkopf, Logo und Fußzeile der Vorlage
         bleiben erhalten.
+
+        OPTIONALE PARAMETER
+
+        betreff ist ein optionaler Betreff und ersetzt die Betreffzeile der
+        Vorlage.
+
+        fields ist ein optionales JSON-Objekt mit Platzhalterwerten. Die Schlüssel
+        werden ohne eckige Klammern angegeben, z. B. "Adressat", "PLZ", "Ort",
+        "Ansprechpartner", "Abteilung" oder "Anschrift".
 
         Das erzeugte Dokument wird lokal gespeichert und anschließend über die
         Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein
@@ -837,33 +853,11 @@ async def create_case_document_basic(
         ctx: Context,
         betreff: Annotated[
                 Optional[str],
-                "Optionaler Betreff; ersetzt die Betreffzeile der Vorlage.",
+                Field(description=CREATE_CASE_DOCUMENT_BETREFF_DESCRIPTION),
         ] = None,
         fields: Annotated[
                 Optional[dict],
-                (
-                        "Optionale Zuordnung von Platzhaltern zu Ersatztexten (JSON-Objekt). "
-                        "Schluessel ist der Platzhaltername OHNE eckige Klammern, z.B. 'Aktenzeichen' "
-                        "fuer den Platzhalter [Aktenzeichen] in der Vorlage; Wert ist der einzusetzende "
-                        "Text. Beispiel: {\"Aktenzeichen\":\"DS.1.2-2024-1234\","
-                        "\"Bearbeiter\":\"Max Mustermann\",\"Adressat\":\"Ministerium für Bildung\","
-                        "\"PLZ\":\"12345\",\"Ort\":\"Musterstadt\",\"Ansprechpartner\":"
-                        "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
-                        "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
-                        "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
-                        "Beim Erstellen von Entwuerfen fuer Briefe oder sonstige Schreiben sind "
-                        "sämtliche bekannten Angaben zum Adressaten zu uebergeben. Dies umfasst "
-                        "insbesondere Name, Bearbeiter, Organisation, Abteilung, Anschrift, "
-                        "Postleitzahl und Ort. Es duerfen ausschließlich die vom Nutzer "
-                        "bereitgestellten oder anderweitig verfuegbaren Angaben uebermittelt "
-                        "werden; fehlende Angaben sind nicht zu ergänzen und nicht zu fingieren. "
-                        "Der Platzhalter [Datum] wird stets automatisch mit dem aktuellen Datum befuellt "
-                        "und kann nicht ueberschrieben werden. [Aktenzeichen] wird - sofern nicht "
-                        "angegeben - aus 'reference' uebernommen. Die Angaben zum aufrufenden Benutzer "
-                        "([Mail], [Name], [Username]) werden - sofern nicht angegeben - automatisch aus "
-                        "den x-enaio-Headern des Aufrufs uebernommen und muessen nicht erfragt werden. "
-                        "Nicht angegebene Platzhalter bleiben unveraendert im Dokument."
-                ),
+                Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
         ] = None,
 ) -> dict:
         return await create_case_document_session(

@@ -92,6 +92,9 @@ async def test_guardrail_reaches_the_client():
     description = tool.description
 
     for marker in (
+        "OPTIONALE PARAMETER",
+        "betreff ist ein optionaler Betreff",
+        "fields ist ein optionales JSON-Objekt",
         "KERNREGEL",
         "ZULÄSSIGKEITSPRÜFUNG",
         "WAS ALS AUSDRÜCKLICHE SPEICHERANWEISUNG GILT",
@@ -136,6 +139,19 @@ async def test_fields_annotation_mentions_common_placeholders():
         assert marker in description
 
 
+async def test_optional_document_parameter_annotations_reach_schema():
+    tool = await EnaioMCP.mcp.get_tool("create_case_document")
+    properties = tool.parameters["properties"]
+
+    assert properties["betreff"]["default"] is None
+    assert "Optionaler Betreff" in properties["betreff"]["description"]
+    assert "Betreffzeile" in properties["betreff"]["description"]
+
+    assert properties["fields"]["default"] is None
+    assert "Optionale Zuordnung" in properties["fields"]["description"]
+    assert "JSON-Objekt" in properties["fields"]["description"]
+
+
 async def test_content_annotation_rejects_json_array_as_string():
     tool = await EnaioMCP.mcp.get_tool("create_case_document")
     description = tool.parameters["properties"]["content"]["description"]
@@ -160,5 +176,7 @@ async def test_server_instructions_mention_the_save_rule():
 
     assert "create_case_document" in instructions
     assert "Speicheranweisung" in instructions
-    assert "SessionID" in instructions
-    assert "Resources" in instructions
+    if EnaioMCP.AUTH_MODE == EnaioMCP.AUTH_MODE_SESSION:
+        assert "SessionID" in instructions
+    else:
+        assert "SessionID" not in instructions
