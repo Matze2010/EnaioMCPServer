@@ -152,9 +152,10 @@ CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION = (
         "\"Erika Mustermann\",\"Abteilung\":\"Bauamt\",\"Anschrift\":"
         "\"Musterstrasse 1\"}. Haeufig genutzte Platzhalter sind z.B. "
         "[Adressat], [PLZ], [Ort], [Ansprechpartner], [Abteilung] und [Anschrift]. "
-        "Vor dem Aufruf von create_case_document soll versucht werden, mit "
-        "get_document_fields die fuer den jeweiligen document_type relevanten "
-        "Platzhalter zu ermitteln und fields anhand dieser Rueckgabe zu befuellen. "
+        "Pflicht vor create_case_document: Rufe zuerst get_document_fields mit "
+        "dem geplanten document_type auf. Befuelle fields anschliessend anhand "
+        "der dort zurueckgegebenen relevanten Platzhalter. Ohne vorherigen "
+        "get_document_fields-Aufruf darf create_case_document nicht aufgerufen werden. "
         "Beim Erstellen von Entwuerfen fuer Briefe oder sonstige Schreiben sind "
         "sämtliche bekannten Angaben zum Adressaten zu uebergeben. Dies umfasst "
         "insbesondere Name, Bearbeiter, Organisation, Abteilung, Anschrift, "
@@ -440,6 +441,9 @@ mcp = FastMCP(
                 "Dokument dauerhaft in Enaio. Standardzustand ist „kein Aufruf“. Es darf "
                 "ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers "
                 "(„Speichern.“, „In Enaio speichern.“, „Zur Akte hinzufügen.“ o. Ä.) aufgerufen "
+                "werden. Zusätzlich muss unmittelbar vor create_case_document immer "
+                "get_document_fields mit dem geplanten document_type aufgerufen werden; "
+                "ohne diesen vorherigen Aufruf darf create_case_document nicht aufgerufen "
                 "werden. Arbeitsaufträge zum Inhalt („erstelle ...“, „formuliere ...“, "
                 "„überarbeite ...“, „erstelle die Endfassung“) sowie Zustimmung zu einem Entwurf "
                 "(„das passt“, „sieht gut aus“) sind keine Speicheranweisung; der Entwurf wird "
@@ -709,9 +713,13 @@ async def create_case_document_session(
         werden ohne eckige Klammern angegeben, z. B. "Adressat", "PLZ", "Ort",
         "Ansprechpartner", "Abteilung" oder "Anschrift".
 
-        Vor dem Aufruf soll versucht werden, mit get_document_fields die fuer
-        den jeweiligen document_type relevanten Platzhalter zu ermitteln und
-        fields anhand dieser Rueckgabe zu befuellen.
+        PFLICHT VOR DEM AUFRUF VON create_case_document:
+        Unmittelbar vor create_case_document muss get_document_fields mit dem
+        geplanten document_type aufgerufen werden. Die Rueckgabe von
+        get_document_fields ist zu verwenden, um die fuer diesen document_type
+        relevanten Platzhalter zu ermitteln und fields zu befuellen. Ohne diesen
+        vorherigen get_document_fields-Aufruf darf create_case_document nicht
+        aufgerufen werden.
 
         Das erzeugte Dokument wird lokal gespeichert und anschließend über die
         Enaio-API in den zugehörigen Vorgang (reference) hochgeladen. Ein

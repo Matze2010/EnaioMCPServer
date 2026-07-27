@@ -159,7 +159,10 @@ async def test_guardrail_reaches_the_client():
         "OPTIONALE PARAMETER",
         "betreff ist ein optionaler Betreff",
         "fields ist ein optionales JSON-Objekt",
+        "PFLICHT VOR DEM AUFRUF",
         "get_document_fields",
+        "muss get_document_fields",
+        "darf create_case_document nicht",
         "relevanten Platzhalter",
         "KERNREGEL",
         "ZULÄSSIGKEITSPRÜFUNG",
@@ -202,6 +205,9 @@ async def test_fields_annotation_mentions_common_placeholders():
         "nicht zu ergänzen",
         "nicht zu fingieren",
         "get_document_fields",
+        "Pflicht vor create_case_document",
+        "Ohne vorherigen get_document_fields-Aufruf",
+        "darf create_case_document nicht",
         "relevanten",
         "document_type",
     ):
@@ -315,6 +321,8 @@ async def test_server_instructions_mention_the_save_rule():
 
     assert "create_case_document" in instructions
     assert "Speicheranweisung" in instructions
+    assert "get_document_fields" in instructions
+    assert "ohne diesen vorherigen Aufruf darf create_case_document nicht" in instructions
     if EnaioMCP.AUTH_MODE == EnaioMCP.AUTH_MODE_SESSION:
         assert "SessionID" in instructions
     else:
