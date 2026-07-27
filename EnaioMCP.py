@@ -96,34 +96,48 @@ DOCUMENT_TEMPLATES = {
                                 "name": "Adressat",
                                 "description": (
                                         "Name bzw. Bezeichnung der adressierten Person, "
-                                        "Stelle oder Organisation; nur mit bekannten "
-                                        "Angaben befuellen."
+                                        "Stelle oder Organisation."
                                 ),
                         },
                         {
                                 "name": "Anschrift",
                                 "description": (
                                         "Anschrift der adressierten Person, "
-                                        "Stelle oder Organisation; nur mit bekannten "
-                                        "Angaben befuellen."
+                                        "Stelle oder Organisation."
                                 ),
                         },
 {
                                 "name": "PLZ",
                                 "description": (
                                         "Postleitzahl der adressierten Person, "
-                                        "Stelle oder Organisation; nur mit bekannten "
-                                        "Angaben befuellen."
+                                        "Stelle oder Organisation."
                                 ),
                         },
-{
+                        {
                                 "name": "Ort",
                                 "description": (
                                         "Ort der adressierten Person, "
-                                        "Stelle oder Organisation; nur mit bekannten "
-                                        "Angaben befuellen."
+                                        "Stelle oder Organisation."
                                 ),
-                        }
+                        },
+                        {
+                                "name": "Bearbeiter",
+                                "description": (
+                                        "Name des Verfassers / Bearbeiters des Dokuments."
+                                ),
+                        },
+                        {
+                                "name": "Durchwahl",
+                                "description": (
+                                        "Durchwahl des Verfassers / Bearbeiters des Dokuments."
+                                ),
+                        },
+                        {
+                                "name": "Email",
+                                "description": (
+                                        "E-Mail-Adresse des Verfassers / Bearbeiters des Dokuments."
+                                ),
+                        },
                 ],
         },
 }
