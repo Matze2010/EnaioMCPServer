@@ -123,7 +123,7 @@ DOCUMENT_TEMPLATES = {
                         {
                                 "name": "Bearbeiter",
                                 "description": (
-                                        "Name des Verfassers / Bearbeiters des Dokuments."
+                                        "Nachname / Familienname des Verfassers / Bearbeiters des Dokuments."
                                 ),
                         },
                         {
