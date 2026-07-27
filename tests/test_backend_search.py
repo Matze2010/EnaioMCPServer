@@ -18,6 +18,7 @@ def _akte_object():
             "Kategorisierung": {"value": "Kategorie"},
             "Aktenverantwortlicher": {"value": "Sachbearbeiter"},
             "Aktenplaneintrag": {"value": "A|B"},
+            "Aktentyp": {"value": "Standardakte"},
         }
     }
 
@@ -31,6 +32,7 @@ def _running_case_object(object_id, aktenzeichen, title="Titel", topics="A|B"):
             "Kategorisierung": {"value": "Standard"},
             "Aktenplaneintrag": {"value": topics},
             "Aktenstatus": {"value": "laufend"},
+            "Aktentyp": {"value": "Standardakte"},
         }
     }
 
@@ -59,6 +61,7 @@ async def test_get_aktenzeichen_returns_record(make_backend):
     assert record["reference_nr"] == "DS.1.2-2024-1234"
     assert record["title"] == "Titel"
     assert record["topics"] == ["A", "B"]
+    assert record["aktentyp"] == "Standardakte"
 
 
 async def test_search_sends_expected_query_envelope(make_backend):
@@ -72,7 +75,11 @@ async def test_search_sends_expected_query_envelope(make_backend):
     await backend.get_aktenzeichen("DS.1.2-2024-1234")
 
     query = json.loads(captured["body"])["query"]
-    assert query["parameters"] == {"aktenzeichen": "DS.1.2-2024-1234"}
+    assert query["parameters"] == {
+        "aktenzeichen": "DS.1.2-2024-1234",
+        "aktentyp": "Standardakte",
+    }
+    assert "Aktentyp=@aktentyp" in query["statement"]
     assert query["skipCount"] == 0
     assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
@@ -90,7 +97,11 @@ async def test_get_running_cases_sends_expected_query(make_backend):
     await backend.get_running_cases("gisch")
 
     query = json.loads(captured["body"])["query"]
-    assert query["parameters"] == {"user": "gisch", "status": "laufend"}
+    assert query["parameters"] == {
+        "user": "gisch",
+        "status": "laufend",
+        "aktentyp": "Standardakte",
+    }
     assert query["handleDeletedDocuments"] == "DELETED_DOCUMENTS_EXCLUDE"
     assert query["options"] == {"Rights": 0, "RegisterContext": 0}
 
@@ -98,6 +109,7 @@ async def test_get_running_cases_sends_expected_query(make_backend):
     assert "FROM OSTPL_AA " in statement
     assert "Aktenverantwortlicher=@user" in statement
     assert "Aktenstatus=@status" in statement
+    assert "Aktentyp=@aktentyp" in statement
     # Der Akteninhalt wird bewusst nicht mitgelesen (kompakte Liste).
     assert "Akteninhalt" not in statement
 
@@ -116,6 +128,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "reference_nr": "DS.5.1-2022-577",
             "title": "Erster Vorgang",
             "category": "Standard",
+            "aktentyp": "Standardakte",
             "topics": ["Datenschutz", "OWi"],
             "status": "laufend",
             "object_id": "15645",
@@ -124,6 +137,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "reference_nr": "DS.7.2-2022-695",
             "title": "Zweiter Vorgang",
             "category": "Standard",
+            "aktentyp": "Standardakte",
             "topics": ["A", "B"],
             "status": "laufend",
             "object_id": "17776",

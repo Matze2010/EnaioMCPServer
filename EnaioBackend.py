@@ -27,6 +27,9 @@ DEFAULT_SEARCH_OPTIONS = {"Rights": 0, "RegisterContext": 0}
 # Aktenstatus, der einen noch nicht abgeschlossenen Vorgang kennzeichnet.
 RUNNING_CASE_STATUS = "laufend"
 
+# Aktentyp, auf den die Vorgangssuchen eingeschraenkt sind.
+STANDARD_CASE_TYPE = "Standardakte"
+
 SEARCH_PATH = "/api/dms/objects/search"
 AUTH_MODE_BASIC = "basic"
 AUTH_MODE_SESSION = "session"
@@ -296,6 +299,7 @@ class EnaioBackend:
             "reference_nr": akte.property("Aktenzeichen"),
             "title": akte.property("Aktenbezeichnung"),
             "category": akte.property("Kategorisierung"),
+            "aktentyp": akte.property("Aktentyp"),
             "topics": akte.property("Aktenplaneintrag").split("|"),
         }
 
@@ -334,9 +338,11 @@ class EnaioBackend:
 
         objects = await self._search(
             "SELECT system:objectId, Aktenbezeichnung, Kategorisierung, "
-            "Aktenverantwortlicher, Aktenplaneintrag, Aktenzeichen, Akteninhalt "
-            "FROM OSTPL_AA WHERE Aktenzeichen=@aktenzeichen",
-            {"aktenzeichen": aktenzeichen},
+            "Aktenverantwortlicher, Aktenplaneintrag, Aktenzeichen, Aktentyp, "
+            "Akteninhalt "
+            "FROM OSTPL_AA "
+            "WHERE Aktenzeichen=@aktenzeichen AND Aktentyp=@aktentyp",
+            {"aktenzeichen": aktenzeichen, "aktentyp": STANDARD_CASE_TYPE},
             context=f"Aktenzeichen {aktenzeichen}",
             session_id=session_id,
         )
@@ -352,7 +358,8 @@ class EnaioBackend:
         """Listet alle laufenden Vorgaenge eines Aktenverantwortlichen auf.
 
         Gesucht wird ueber die Bedingung ``Aktenverantwortlicher=@user AND
-        Aktenstatus=@status``; der Status ist fest auf ``laufend`` gesetzt. Der
+        Aktenstatus=@status AND Aktentyp=@aktentyp``; der Status ist fest auf
+        ``laufend``, der Aktentyp fest auf ``Standardakte`` gesetzt. Der
         ``Akteninhalt`` wird bewusst nicht mitgelesen, damit die Liste auch bei
         vielen Treffern kompakt bleibt - Details liefert
         :meth:`get_aktenzeichen`.
@@ -364,10 +371,15 @@ class EnaioBackend:
 
         objects = await self._search(
             "SELECT system:objectId, Aktenzeichen, Aktenbezeichnung, "
-            "Kategorisierung, Aktenplaneintrag, Aktenstatus "
+            "Kategorisierung, Aktenplaneintrag, Aktenstatus, Aktentyp "
             "FROM OSTPL_AA "
-            "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status",
-            {"user": user, "status": RUNNING_CASE_STATUS},
+            "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status "
+            "AND Aktentyp=@aktentyp",
+            {
+                "user": user,
+                "status": RUNNING_CASE_STATUS,
+                "aktentyp": STANDARD_CASE_TYPE,
+            },
             context=f"Laufende Vorgaenge von {user}",
             session_id=session_id,
         )

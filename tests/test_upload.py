@@ -19,6 +19,7 @@ def _search_response():
                     "Kategorisierung": {"value": "Kategorie"},
                     "Aktenverantwortlicher": {"value": "Sachbearbeiter"},
                     "Aktenplaneintrag": {"value": "A|B"},
+                    "Aktentyp": {"value": "Standardakte"},
                 }
             }
         ]
