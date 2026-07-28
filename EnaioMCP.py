@@ -520,6 +520,10 @@ mcp = FastMCP(
                 "Wird nach allen offenen bzw. laufenden Vorgängen einer Person gefragt "
                 "('welche Vorgänge laufen bei mir', 'offene Akten von ...'), ist "
                 "list_running_cases das passende Tool. "
+                "Wird nach den vorhandenen Bearbeitern bzw. Nutzern gefragt oder ist "
+                "das für list_running_cases benötigte Benutzerkürzel einer Person "
+                "unbekannt, liefert list_users die Liste der Nutzer mit ihren "
+                "Kürzeln, Namen und eMail-Adressen. "
                 "Für create_case_document gilt eine Sonderregel: Dieses Tool speichert ein "
                 "Dokument dauerhaft in Enaio. Standardzustand ist „kein Aufruf“. Es darf "
                 "ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers "
@@ -702,6 +706,72 @@ async def list_running_cases_basic(
         ctx: Context,
 ) -> dict:
         return await list_running_cases_session(user, None, ctx)
+
+
+@mcp.tool(
+        name="list_users",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
+        annotations=ToolAnnotations(
+                title="Bearbeiter / Nutzer auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_users_session(
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
+        ctx: Context,
+) -> dict:
+        """
+        Listet alle Bearbeiter (Nutzer, Sachbearbeiter, Kolleginnen und Kollegen)
+        auf, die im Vorgangsbearbeitungssystem Enaio angelegt sind.
+
+        Nutze dieses Tool, wenn nach den vorhandenen Personen gefragt wird - etwa
+        "wer arbeitet hier", "welche Bearbeiter gibt es", "wie ist die
+        eMail-Adresse von ..." - oder wenn für list_running_cases das
+        Benutzerkürzel einer Person gebraucht wird, aber nicht bekannt ist.
+
+        Zu jedem Eintrag liefert 'name' das Benutzerkürzel (z. B. 'GISCH'), das
+        bei list_running_cases unverändert als Parameter 'user' eingesetzt werden
+        kann, dazu 'fullname' den Nachnamen bzw. angezeigten Namen, 'email' die
+        dienstliche eMail-Adresse, 'groups' die Gruppen- und
+        Referatszugehörigkeiten sowie 'guid' und 'wfguid' die technischen
+        Kennungen des Benutzers.
+
+        Die Liste ist nach 'name' sortiert und bewusst gefiltert: gesperrte Konten
+        und technische Konten ohne eMail-Adresse (Dienst-, Administrations- und
+        Sammelkonten) sind nicht enthalten. Sie enthält also nur Konten, hinter
+        denen eine erreichbare Person steht.
+        """
+
+        await ctx.info("Lade Liste der Bearbeiter/Nutzer aus ENAIO")
+        users = await backend.get_users(session_id=SessionID)
+
+        return {
+                "count": len(users),
+                "users": users,
+        }
+
+
+@mcp.tool(
+        name="list_users",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=list_users_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Bearbeiter / Nutzer auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_users_basic(
+        ctx: Context,
+) -> dict:
+        return await list_users_session(None, ctx)
 
 
 @mcp.tool(

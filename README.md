@@ -28,6 +28,7 @@ hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
 |------|-------|
 | `get_case_metadata` | Metadaten und Dokumentliste zu einem Aktenzeichen; liefert zusätzlich `dms_link` zum Öffnen im Web-Client |
 | `list_running_cases` | Alle laufenden Vorgänge eines Aktenverantwortlichen (Benutzerkürzel), je Treffer mit `reference_nr` und `dms_link` |
+| `list_users` | Alle Bearbeiter/Nutzer mit Kürzel (`name`), Name, eMail und Gruppen; gesperrte Konten und technische Konten ohne eMail-Adresse werden ausgefiltert |
 | `get_document_fields` | Listet je Dokumenttyp die optional manuell befüllbaren `fields`-Platzhalter für `create_case_document` |
 | `access_document_fulltext` | Volltext eines Dokuments als Klartext — zum Lesen, Zitieren, Auswerten |
 | `download_document` | Originaldatei eines Dokuments, Base64-kodiert |
