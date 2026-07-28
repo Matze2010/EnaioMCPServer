@@ -358,12 +358,10 @@ class EnaioBackend:
         """Baut den schlanken Posteingangs-Datensatz aus einer Workflow-Aktivitaet."""
 
         return {
+            "id": entry.get("id"),
             "name": entry.get("processName"),
             "activity": entry.get("activityName"),
             "creationDate": cls._epoch_ms_to_iso(entry.get("creationTime")),
-            "process_id": entry.get("processID"),
-            "activity_id": entry.get("activityId"),
-            "object_id": entry.get("objectId"),
         }
 
     @staticmethod

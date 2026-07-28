@@ -808,8 +808,7 @@ async def list_inbox_session(
         Zu jedem Eintrag liefert 'name' die Bezeichnung des Posteingangs
         (z. B. 'Posteingang 24298'), 'activity' den anstehenden Arbeitsschritt
         (z. B. 'Bearbeiten', 'Kenntnisnahme') und 'creationDate' den Zeitpunkt
-        des Eingangs. 'process_id', 'activity_id' und 'object_id' sind
-        technische Kennungen des Eintrags.
+        des Eingangs. 'id' ist die technische Kennung des Postkorbeintrags.
 
         Die Liste ist nach Eingangszeitpunkt sortiert (neueste zuerst) und
         bewusst gefiltert: Bereits gelesene Einträge und Aktivitäten anderer

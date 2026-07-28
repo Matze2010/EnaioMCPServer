@@ -130,15 +130,14 @@ async def test_get_inbox_returns_slim_record(make_backend):
     inbox = await backend.get_inbox(session_id="SESSION-1")
 
     # Ausgegeben wird nur die vereinbarte Teilmenge der Felder; Betreff,
-    # personalized, substitute und overTime bleiben aussen vor.
+    # personalized, substitute, overTime sowie die Kennungen von Prozess,
+    # Aktivitaet und Objekt bleiben aussen vor.
     assert inbox == [
         {
+            "id": "ID-Posteingang 24298",
             "name": "Posteingang 24298",
             "activity": "Kenntnisnahme-0",
             "creationDate": inbox[0]["creationDate"],
-            "process_id": "PROCESS-Posteingang 24298",
-            "activity_id": "ACTIVITY-Posteingang 24298",
-            "object_id": 303786,
         }
     ]
     # Millisekunden-Zeitstempel wird als ISO-8601 ohne Bruchteile ausgegeben.
