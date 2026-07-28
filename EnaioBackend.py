@@ -33,7 +33,9 @@ STANDARD_CASE_TYPE = "Standardakte"
 SEARCH_PATH = "/api/dms/objects/search"
 
 # Endpunkt der Organisationsverwaltung, der alle angelegten Benutzer liefert.
-USERS_PATH = "/api/organization/users"
+# Er liegt nicht unter demselben Praefix wie die uebrigen Aufrufe und traegt das
+# /osrest daher selbst im Pfad.
+USERS_PATH = "/osrest/api/organization/users"
 
 # Werte des Feldes "locked", die einen nicht gesperrten Benutzer kennzeichnen.
 # Enaio liefert "0"/"1" als String; Zahlen und true/false werden mit abgedeckt.
@@ -419,7 +421,7 @@ class EnaioBackend:
     async def get_users(self, session_id=None):
         """Listet die nutzbaren Bearbeiter/Benutzer der Organisation auf.
 
-        Gelesen wird ``/api/organization/users``. Aus der Rohliste fallen alle
+        Gelesen wird ``/osrest/api/organization/users``. Aus der Rohliste fallen alle
         Eintraege heraus, die keine eMail-Adresse tragen oder gesperrt sind
         (``locked`` ungleich ``0``) - das sind in der Praxis technische Konten,
         Admin-Zweitkonten und stillgelegte Sammelpostfaecher.

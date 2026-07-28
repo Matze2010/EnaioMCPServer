@@ -1,4 +1,4 @@
-"""Tests fuer ``EnaioBackend.get_users`` (Endpunkt /api/organization/users)."""
+"""Tests fuer ``EnaioBackend.get_users`` (Endpunkt /osrest/api/organization/users)."""
 
 import httpx
 import pytest
@@ -61,9 +61,11 @@ async def test_get_users_requests_organization_endpoint(make_backend):
 
     await backend.get_users(session_id="SESSION-1")
 
+    # Der Endpunkt liegt ausserhalb des Praefixes der uebrigen Aufrufe und
+    # bringt das /osrest deshalb selbst mit.
     request = seen[0]
     assert request.method == "GET"
-    assert str(request.url) == "https://enaio.test/api/organization/users"
+    assert str(request.url) == "https://enaio.test/osrest/api/organization/users"
     assert request.headers["Cookie"] == "JSESSIONID=SESSION-1"
 
 
