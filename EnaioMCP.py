@@ -524,6 +524,10 @@ mcp = FastMCP(
                 "das für list_running_cases benötigte Benutzerkürzel einer Person "
                 "unbekannt, liefert list_users die Liste der Nutzer mit ihren "
                 "Kürzeln, Namen und eMail-Adressen. "
+                "Wird nach der eingegangenen Post gefragt ('was liegt in meinem "
+                "Posteingang', 'habe ich neue Post', 'was muss ich noch bearbeiten'), "
+                "ist list_inbox das passende Tool; es liefert die noch nicht "
+                "gelesenen Posteingänge des angemeldeten Nutzers. "
                 "Für create_case_document gilt eine Sonderregel: Dieses Tool speichert ein "
                 "Dokument dauerhaft in Enaio. Standardzustand ist „kein Aufruf“. Es darf "
                 "ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers "
@@ -772,6 +776,74 @@ async def list_users_basic(
         ctx: Context,
 ) -> dict:
         return await list_users_session(None, ctx)
+
+
+@mcp.tool(
+        name="list_inbox",
+        version=AUTH_MODE_SESSION,
+        tags={AUTH_TAG_SESSION},
+        annotations=ToolAnnotations(
+                title="Posteingang auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_inbox_session(
+        SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
+        ctx: Context,
+) -> dict:
+        """
+        Listet die offenen Posteingänge des angemeldeten Nutzers auf - also die
+        Post, die im Vorgangsbearbeitungssystem Enaio zur Bearbeitung im Postkorb
+        liegt und noch nicht gelesen wurde.
+
+        Nutze dieses Tool, wenn nach der eingegangenen Post gefragt wird - etwa
+        "was liegt in meinem Posteingang", "habe ich neue Post", "was muss ich
+        noch bearbeiten" oder "was ist reingekommen". Geht es dagegen um die
+        eigenen laufenden Akten einer Person, ist list_running_cases das
+        passende Tool.
+
+        Zu jedem Eintrag liefert 'name' die Bezeichnung des Posteingangs
+        (z. B. 'Posteingang 24298'), 'activity' den anstehenden Arbeitsschritt
+        (z. B. 'Bearbeiten', 'Kenntnisnahme') und 'creationDate' den Zeitpunkt
+        des Eingangs. 'process_id', 'activity_id' und 'object_id' sind
+        technische Kennungen des Eintrags.
+
+        Die Liste ist nach Eingangszeitpunkt sortiert (neueste zuerst) und
+        bewusst gefiltert: Bereits gelesene Einträge und Aktivitäten anderer
+        Workflows (Ad-hoc-Umläufe, Schlusszeichnung, ...) sind nicht enthalten.
+        Sie bezieht sich immer auf den angemeldeten Nutzer und lässt sich nicht
+        auf eine andere Person umstellen.
+        """
+
+        await ctx.info("Lade Posteingang aus ENAIO")
+        inbox = await backend.get_inbox(session_id=SessionID)
+
+        return {
+                "count": len(inbox),
+                "inbox": inbox,
+        }
+
+
+@mcp.tool(
+        name="list_inbox",
+        version=AUTH_MODE_BASIC,
+        tags={AUTH_TAG_BASIC},
+        description=list_inbox_session.__doc__,
+        annotations=ToolAnnotations(
+                title="Posteingang auflisten",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+        ),
+)
+async def list_inbox_basic(
+        ctx: Context,
+) -> dict:
+        return await list_inbox_session(None, ctx)
 
 
 @mcp.tool(
