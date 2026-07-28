@@ -19,12 +19,14 @@ INBOX = [
         "name": "Posteingang 24298",
         "activity": "Bearbeiten",
         "creationDate": "2026-07-13T09:39:35",
+        "document_id": 303786,
     },
     {
         "id": "6D30AEE41C704AB5921797C0E4A680BD",
         "name": "Posteingang 24299",
         "activity": "Bearbeiten",
         "creationDate": "2026-07-13T09:37:40",
+        "document_id": 303787,
     },
 ]
 

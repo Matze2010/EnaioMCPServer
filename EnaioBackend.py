@@ -362,6 +362,10 @@ class EnaioBackend:
             "name": entry.get("processName"),
             "activity": entry.get("activityName"),
             "creationDate": cls._epoch_ms_to_iso(entry.get("creationTime")),
+            # Kennung des im Posteingang liegenden Dokuments. Sie heisst bewusst
+            # document_id, weil sie unveraendert als Dokument-ID in get_document
+            # weiterverwendet wird (access_document_fulltext, download_document).
+            "document_id": entry.get("objectId"),
         }
 
     @staticmethod
