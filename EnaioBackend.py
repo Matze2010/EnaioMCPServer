@@ -31,6 +31,16 @@ RUNNING_CASE_STATUS = "laufend"
 STANDARD_CASE_TYPE = "Standardakte"
 
 SEARCH_PATH = "/api/dms/objects/search"
+
+# Endpunkt der Organisationsverwaltung, der alle angelegten Benutzer liefert.
+# Er liegt nicht unter demselben Praefix wie die uebrigen Aufrufe und traegt das
+# /osrest daher selbst im Pfad.
+USERS_PATH = "/osrest/api/organization/users"
+
+# Werte des Feldes "locked", die einen nicht gesperrten Benutzer kennzeichnen.
+# Enaio liefert "0"/"1" als String; Zahlen und true/false werden mit abgedeckt.
+UNLOCKED_VALUES = {"0", "false"}
+
 AUTH_MODE_BASIC = "basic"
 AUTH_MODE_SESSION = "session"
 AUTH_MODES = {AUTH_MODE_BASIC, AUTH_MODE_SESSION}
@@ -304,6 +314,19 @@ class EnaioBackend:
         }
 
     @staticmethod
+    def _user_record(entry, email):
+        """Baut den schlanken Nutzerdatensatz aus einem Organization-Eintrag."""
+
+        return {
+            "name": entry.get("name"),
+            "fullname": entry.get("fullname"),
+            "email": email,
+            "groups": entry.get("groups") or [],
+            "guid": entry.get("guid"),
+            "wfguid": entry.get("wfguid"),
+        }
+
+    @staticmethod
     def _document_record(child, type_name, *, id_key, id_field, title_field):
         """Baut den einheitlichen Dokument-Datensatz aus einem Enaio-Objekt."""
 
@@ -394,6 +417,69 @@ class EnaioBackend:
 
         self.logger.info("Laufende Vorgaenge von %s: %d Treffer", user, len(cases))
         return cases
+
+    async def get_users(self, session_id=None):
+        """Listet die nutzbaren Bearbeiter/Benutzer der Organisation auf.
+
+        Gelesen wird ``/osrest/api/organization/users``. Aus der Rohliste fallen alle
+        Eintraege heraus, die keine eMail-Adresse tragen oder gesperrt sind
+        (``locked`` ungleich ``0``) - das sind in der Praxis technische Konten,
+        Admin-Zweitkonten und stillgelegte Sammelpostfaecher.
+
+        :returns: Liste der Benutzer, aufsteigend nach ``name`` sortiert; leer,
+            wenn kein Eintrag die Bedingungen erfuellt.
+        """
+
+        context = "Nutzerliste der Organisation"
+
+        response = await self._request(
+            "GET",
+            USERS_PATH,
+            context=context,
+            session_id=session_id,
+            headers={"accept": "application/json"},
+        )
+
+        try:
+            entries = response.json()
+        except Exception as e:
+            self.logger.exception("Unerwartete Antwort der ENAIO API bei %s", context)
+            raise HTTPException(
+                status_code=500, detail=f"An internal error occurred: {e}"
+            )
+
+        if not isinstance(entries, list):
+            self.logger.error(
+                "Unerwartete Antwort der ENAIO API bei %s: %s statt Liste",
+                context,
+                type(entries).__name__,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Unerwartete Antwort der ENAIO API: Nutzerliste ist keine Liste",
+            )
+
+        users = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            email = str(entry.get("email") or "").strip()
+            if not email:
+                continue
+
+            locked = str(entry.get("locked") or "0").strip().lower()
+            if locked not in UNLOCKED_VALUES:
+                continue
+
+            users.append(self._user_record(entry, email))
+
+        users.sort(key=lambda user: (user["name"] or "").upper())
+
+        self.logger.info(
+            "Nutzerliste: %d von %d Eintraegen nutzbar", len(users), len(entries)
+        )
+        return users
 
     async def get_document_list(self, parent_object_id, session_id=None):
         """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""
