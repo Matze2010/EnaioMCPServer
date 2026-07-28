@@ -527,7 +527,9 @@ mcp = FastMCP(
                 "Wird nach der eingegangenen Post gefragt ('was liegt in meinem "
                 "Posteingang', 'habe ich neue Post', 'was muss ich noch bearbeiten'), "
                 "ist list_inbox das passende Tool; es liefert die noch nicht "
-                "gelesenen Posteingänge des angemeldeten Nutzers. "
+                "gelesenen Posteingänge des angemeldeten Nutzers. Soll der Inhalt "
+                "eines Posteingangs gelesen werden, führt dessen 'document_id' "
+                "direkt in access_document_fulltext bzw. download_document. "
                 "Für create_case_document gilt eine Sonderregel: Dieses Tool speichert ein "
                 "Dokument dauerhaft in Enaio. Standardzustand ist „kein Aufruf“. Es darf "
                 "ausschließlich nach einer ausdrücklichen Speicheranweisung des Nutzers "
@@ -808,8 +810,14 @@ async def list_inbox_session(
         Zu jedem Eintrag liefert 'name' die Bezeichnung des Posteingangs
         (z. B. 'Posteingang 24298'), 'activity' den anstehenden Arbeitsschritt
         (z. B. 'Bearbeiten', 'Kenntnisnahme') und 'creationDate' den Zeitpunkt
-        des Eingangs. 'process_id', 'activity_id' und 'object_id' sind
-        technische Kennungen des Eintrags.
+        des Eingangs. 'id' ist die technische Kennung des Postkorbeintrags.
+
+        'document_id' ist die Dokument-ID der eingegangenen Post. Soll der Inhalt
+        eines Posteingangs gelesen, zitiert oder ausgewertet werden, wird dieser
+        Wert unverändert als Parameter 'document' an access_document_fulltext
+        übergeben; wird die Originaldatei selbst gebraucht, an
+        download_document. Denselben Wert erwarten die Resources
+        document://{document}/fulltext und document://{document}/file.
 
         Die Liste ist nach Eingangszeitpunkt sortiert (neueste zuerst) und
         bewusst gefiltert: Bereits gelesene Einträge und Aktivitäten anderer

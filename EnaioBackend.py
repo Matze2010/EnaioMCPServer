@@ -358,12 +358,14 @@ class EnaioBackend:
         """Baut den schlanken Posteingangs-Datensatz aus einer Workflow-Aktivitaet."""
 
         return {
+            "id": entry.get("id"),
             "name": entry.get("processName"),
             "activity": entry.get("activityName"),
             "creationDate": cls._epoch_ms_to_iso(entry.get("creationTime")),
-            "process_id": entry.get("processID"),
-            "activity_id": entry.get("activityId"),
-            "object_id": entry.get("objectId"),
+            # Kennung des im Posteingang liegenden Dokuments. Sie heisst bewusst
+            # document_id, weil sie unveraendert als Dokument-ID in get_document
+            # weiterverwendet wird (access_document_fulltext, download_document).
+            "document_id": entry.get("objectId"),
         }
 
     @staticmethod

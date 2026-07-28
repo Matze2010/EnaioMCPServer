@@ -15,20 +15,18 @@ class _Ctx:
 
 INBOX = [
     {
+        "id": "60B9C4386EEC4378A7780D1746FD068A",
         "name": "Posteingang 24298",
         "activity": "Bearbeiten",
         "creationDate": "2026-07-13T09:39:35",
-        "process_id": "88F418F4AAA44309B7901EC0DA2D3E32",
-        "activity_id": "4C2085F760D54A4FBF0992D7B4777849",
-        "object_id": 303786,
+        "document_id": 303786,
     },
     {
+        "id": "6D30AEE41C704AB5921797C0E4A680BD",
         "name": "Posteingang 24299",
         "activity": "Bearbeiten",
         "creationDate": "2026-07-13T09:37:40",
-        "process_id": "54D80CA341864200AB1689A681C7AB1E",
-        "activity_id": "4C2085F760D54A4FBF0992D7B4777849",
-        "object_id": 303787,
+        "document_id": 303787,
     },
 ]
 
