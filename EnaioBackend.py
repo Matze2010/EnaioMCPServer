@@ -5,6 +5,7 @@ import logging
 import re
 import unicodedata
 
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 from fastapi import HTTPException
@@ -36,6 +37,16 @@ SEARCH_PATH = "/api/dms/objects/search"
 # Er liegt nicht unter demselben Praefix wie die uebrigen Aufrufe und traegt das
 # /osrest daher selbst im Pfad.
 USERS_PATH = "/osrest/api/organization/users"
+
+# Endpunkt der laufenden Workflow-Aktivitaeten des angemeldeten Nutzers. Er liegt
+# wie der Organization-Endpunkt ausserhalb des Praefixes der DMS-Aufrufe und
+# traegt das /osrest deshalb selbst im Pfad.
+WORKFLOWS_RUNNING_PATH = "/osrest/api/workflows/running"
+
+# WorkflowId des Posteingangs-Workflows. Der Endpunkt liefert die Aktivitaeten
+# aller Workflows (Ad-hoc-Umlaeufe, Schlusszeichnung, ...); Posteingaenge sind
+# ausschliesslich die Aktivitaeten dieses einen Workflows.
+INBOX_WORKFLOW_ID = "3E41FBD0FE084633947F36C60856D510"
 
 # Werte des Feldes "locked", die einen nicht gesperrten Benutzer kennzeichnen.
 # Enaio liefert "0"/"1" als String; Zahlen und true/false werden mit abgedeckt.
@@ -327,6 +338,35 @@ class EnaioBackend:
         }
 
     @staticmethod
+    def _epoch_ms_to_iso(value):
+        """Wandelt einen Zeitstempel in Millisekunden in einen ISO-8601-String.
+
+        Der Workflow-Endpunkt liefert Zeitstempel als Millisekunden seit Epoch.
+        Fehlende oder unbrauchbare Werte ergeben ``None``, damit ein einzelner
+        kaputter Eintrag nicht die ganze Liste kippt.
+        """
+
+        try:
+            return datetime.fromtimestamp(int(value) / 1000).isoformat(
+                timespec="seconds"
+            )
+        except (TypeError, ValueError, OSError, OverflowError):
+            return None
+
+    @classmethod
+    def _inbox_record(cls, entry):
+        """Baut den schlanken Posteingangs-Datensatz aus einer Workflow-Aktivitaet."""
+
+        return {
+            "name": entry.get("processName"),
+            "activity": entry.get("activityName"),
+            "creationDate": cls._epoch_ms_to_iso(entry.get("creationTime")),
+            "process_id": entry.get("processID"),
+            "activity_id": entry.get("activityId"),
+            "object_id": entry.get("objectId"),
+        }
+
+    @staticmethod
     def _document_record(child, type_name, *, id_key, id_field, title_field):
         """Baut den einheitlichen Dokument-Datensatz aus einem Enaio-Objekt."""
 
@@ -480,6 +520,73 @@ class EnaioBackend:
             "Nutzerliste: %d von %d Eintraegen nutzbar", len(users), len(entries)
         )
         return users
+
+    async def get_inbox(self, session_id=None):
+        """Listet die offenen Posteingaenge des angemeldeten Nutzers auf.
+
+        Gelesen wird ``/osrest/api/workflows/running?verbose=true``. Der Endpunkt
+        liefert alle laufenden Workflow-Aktivitaeten des angemeldeten Nutzers.
+        Uebrig bleiben davon nur die Aktivitaeten des Posteingangs-Workflows
+        (``workflowId`` gleich :data:`INBOX_WORKFLOW_ID`), die noch nicht gelesen
+        wurden (``read`` nicht gesetzt).
+
+        :returns: Liste der Posteingaenge, neueste zuerst; leer, wenn kein
+            Eintrag die Bedingungen erfuellt.
+        """
+
+        context = "Posteingang des angemeldeten Nutzers"
+
+        response = await self._request(
+            "GET",
+            WORKFLOWS_RUNNING_PATH,
+            context=context,
+            session_id=session_id,
+            params={"verbose": "true"},
+            headers={"accept": "application/json"},
+        )
+
+        try:
+            entries = response.json()
+        except Exception as e:
+            self.logger.exception("Unerwartete Antwort der ENAIO API bei %s", context)
+            raise HTTPException(
+                status_code=500, detail=f"An internal error occurred: {e}"
+            )
+
+        if not isinstance(entries, list):
+            self.logger.error(
+                "Unerwartete Antwort der ENAIO API bei %s: %s statt Liste",
+                context,
+                type(entries).__name__,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Unerwartete Antwort der ENAIO API: Posteingang ist keine Liste",
+            )
+
+        inbox = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            # Bereits gelesene Eintraege sind erledigt und gehoeren nicht in die
+            # Uebersicht dessen, was noch offen ist.
+            if entry.get("read"):
+                continue
+
+            workflow_id = str(entry.get("workflowId") or "").strip().upper()
+            if workflow_id != INBOX_WORKFLOW_ID:
+                continue
+
+            inbox.append(self._inbox_record(entry))
+
+        # Neueste Posteingaenge zuerst; Eintraege ohne Zeitstempel ans Ende.
+        inbox.sort(key=lambda item: item["creationDate"] or "", reverse=True)
+
+        self.logger.info(
+            "Posteingang: %d von %d Eintraegen offen", len(inbox), len(entries)
+        )
+        return inbox
 
     async def get_document_list(self, parent_object_id, session_id=None):
         """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""
