@@ -271,6 +271,51 @@ async def test_get_document_file_fetches_content(make_backend):
     assert document["content"] == b"BINARY"
 
 
+async def test_get_document_resolves_system_object_id(make_backend):
+    """Auch eine system:objectId muss ein OSTPL_AA_DOKUMENT finden.
+
+    list_inbox liefert als document_id die system:objectId aus dem
+    Workflow-Endpunkt, nicht die Fachnummer AA_DOK_PENR.
+    """
+
+    statements = []
+
+    def handler(request):
+        if request.url.path == "/api/dms/objects/search":
+            statements.append(json.loads(request.content)["query"]["statement"])
+            return httpx.Response(
+                200,
+                json={
+                    "objects": [
+                        {
+                            "properties": {
+                                "system:objectTypeId": {"value": UPLOAD_OBJECT_TYPE_ID},
+                                "system:objectId": {"value": "OBJ1"},
+                                "AA_DOK_PENR": {"value": "2024-42"},
+                                "Betreff": {"value": "Ein Dokument"},
+                                "system:creationDate": {"value": "2024-01-01"},
+                                "system:lastModificationDate": {"value": "2024-01-02"},
+                            }
+                        }
+                    ]
+                },
+            )
+        assert request.url.path == "/api/dms/objects/OBJ1/contents/file/1"
+        return httpx.Response(200, content=b"BINARY")
+
+    backend = make_backend(handler)
+    document = await backend.get_document("OBJ1", "file")
+
+    # Der Dokumentzweig vergleicht beide Kennungsarten.
+    dokument_branch = statements[0].split("UNION")[0]
+    assert "AA_DOK_PENR=@objectId" in dokument_branch
+    assert "system:objectId=@objectId" in dokument_branch
+
+    # Ausgegeben wird weiterhin die Fachnummer, nicht die uebergebene Kennung.
+    assert document["document_nr"] == "2024-42"
+    assert document["content"] == b"BINARY"
+
+
 async def test_get_rendition_returns_none_on_error_status(make_backend):
     def handler(request):
         return httpx.Response(404)

@@ -641,8 +641,17 @@ class EnaioBackend:
             Text-Rendition.
         """
 
+        # Die uebergebene Kennung kann zweierlei sein: die Fachnummer
+        # AA_DOK_PENR, wie sie get_case_metadata ueber get_document_list
+        # ausgibt, oder eine system:objectId, wie sie list_inbox aus dem
+        # Workflow-Endpunkt liefert. Bei EMail und OSTPL_AA_AN ist die
+        # system:objectId ohnehin die nach aussen sichtbare Kennung; nur bei
+        # OSTPL_AA_DOKUMENT fallen beide auseinander. Dort wurde frueher allein
+        # die Fachnummer geprueft, weshalb Posteingaenge in HTTP 404 liefen.
+        # Deshalb vergleicht dieser Zweig beide Spalten.
         objects = await self._search(
-            "SELECT * FROM OSTPL_AA_DOKUMENT where AA_DOK_PENR=@objectId "
+            "SELECT * FROM OSTPL_AA_DOKUMENT "
+            "where (AA_DOK_PENR=@objectId OR system:objectId=@objectId) "
             "UNION SELECT * FROM OSTPL_AA_AN where system:objectId=@objectId "
             "UNION SELECT * FROM EMail where system:objectId=@objectId",
             {"objectId": document_id},
