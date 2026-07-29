@@ -106,7 +106,7 @@ DOCUMENT_TEMPLATES = {
                                         "Stelle oder Organisation."
                                 ),
                         },
-{
+                        {
                                 "name": "PLZ",
                                 "description": (
                                         "Postleitzahl der adressierten Person, "
@@ -314,6 +314,28 @@ CreateCaseDocumentFields = Annotated[
         BeforeValidator(_as_json_dict_string),
         Field(description=CREATE_CASE_DOCUMENT_FIELDS_DESCRIPTION),
 ]
+
+
+def _readonly_annotations(title: str, open_world: bool = True) -> ToolAnnotations:
+        """Annotations fuer lesende, ungefaehrliche Tools (der Regelfall)."""
+        return ToolAnnotations(
+                title=title,
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=open_world,
+        )
+
+
+def _mutating_annotations(title: str) -> ToolAnnotations:
+        """Annotations fuer Tools, die Enaio-Daten dauerhaft und unwiderruflich aendern."""
+        return ToolAnnotations(
+                title=title,
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+        )
 
 
 def _sanitize_filename(text: str) -> str:
@@ -563,13 +585,7 @@ if AUTH_MODE == AUTH_MODE_SESSION:
         name="get_case_metadata",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Vorgang / Akte abrufen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Vorgang / Akte abrufen"),
 )
 async def get_case_metadata_session(
         reference: Annotated[
@@ -616,13 +632,7 @@ async def get_case_metadata_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=get_case_metadata_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Vorgang / Akte abrufen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Vorgang / Akte abrufen"),
 )
 async def get_case_metadata_basic(
         reference: Annotated[
@@ -639,13 +649,7 @@ async def get_case_metadata_basic(
         name="list_running_cases",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Laufende Vorgänge auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Laufende Vorgänge auflisten"),
 )
 async def list_running_cases_session(
         user: Annotated[
@@ -695,13 +699,7 @@ async def list_running_cases_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=list_running_cases_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Laufende Vorgänge auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Laufende Vorgänge auflisten"),
 )
 async def list_running_cases_basic(
         user: Annotated[
@@ -718,13 +716,7 @@ async def list_running_cases_basic(
         name="list_users",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Bearbeiter / Nutzer auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Bearbeiter / Nutzer auflisten"),
 )
 async def list_users_session(
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
@@ -766,13 +758,7 @@ async def list_users_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=list_users_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Bearbeiter / Nutzer auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Bearbeiter / Nutzer auflisten"),
 )
 async def list_users_basic(
         ctx: Context,
@@ -784,13 +770,7 @@ async def list_users_basic(
         name="list_inbox",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Posteingang auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Posteingang auflisten"),
 )
 async def list_inbox_session(
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
@@ -840,13 +820,7 @@ async def list_inbox_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=list_inbox_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Posteingang auflisten",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Posteingang auflisten"),
 )
 async def list_inbox_basic(
         ctx: Context,
@@ -858,13 +832,7 @@ async def list_inbox_basic(
         name="get_document_fields",
         version=AUTH_MODE,
         tags={AUTH_TAG_SESSION if AUTH_MODE == AUTH_MODE_SESSION else AUTH_TAG_BASIC},
-        annotations=ToolAnnotations(
-                title="Optionale Dokumentfelder abrufen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=False,
-        ),
+        annotations=_readonly_annotations("Optionale Dokumentfelder abrufen", open_world=False),
 )
 async def get_document_fields(
         document_type: Annotated[
@@ -895,13 +863,7 @@ async def get_document_fields(
         name="create_case_document",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Dokument erzeugen und in Enaio speichern",
-                readOnlyHint=False,
-                destructiveHint=True,
-                idempotentHint=False,
-                openWorldHint=False,
-        ),
+        annotations=_mutating_annotations("Dokument erzeugen und in Enaio speichern"),
 )
 async def create_case_document_session(
         reference: Annotated[
@@ -1202,13 +1164,7 @@ async def create_case_document_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=create_case_document_session.__doc__.split("\n        :param", 1)[0],
-        annotations=ToolAnnotations(
-                title="Dokument erzeugen und in Enaio speichern",
-                readOnlyHint=False,
-                destructiveHint=True,
-                idempotentHint=False,
-                openWorldHint=False,
-        ),
+        annotations=_mutating_annotations("Dokument erzeugen und in Enaio speichern"),
 )
 async def create_case_document_basic(
         reference: Annotated[
@@ -1243,13 +1199,7 @@ async def create_case_document_basic(
         name="access_document_fulltext",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Dokumentinhalt als Text lesen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Dokumentinhalt als Text lesen"),
 )
 async def access_document_fulltext_session(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
@@ -1273,13 +1223,7 @@ async def access_document_fulltext_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=access_document_fulltext_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Dokumentinhalt als Text lesen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Dokumentinhalt als Text lesen"),
 )
 async def access_document_fulltext_basic(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
@@ -1292,13 +1236,7 @@ async def access_document_fulltext_basic(
         name="download_document",
         version=AUTH_MODE_SESSION,
         tags={AUTH_TAG_SESSION},
-        annotations=ToolAnnotations(
-                title="Dokument als Datei herunterladen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Dokument als Datei herunterladen"),
 )
 async def download_document_session(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
@@ -1323,13 +1261,7 @@ async def download_document_session(
         version=AUTH_MODE_BASIC,
         tags={AUTH_TAG_BASIC},
         description=download_document_session.__doc__,
-        annotations=ToolAnnotations(
-                title="Dokument als Datei herunterladen",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=True,
-        ),
+        annotations=_readonly_annotations("Dokument als Datei herunterladen"),
 )
 async def download_document_basic(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
