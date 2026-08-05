@@ -670,7 +670,7 @@ class EnaioBackend:
                 status_code=403,
                 detail=(
                     f"Zugriff auf die Dokumente des Vorgangs '{parent_object_id}' "
-                    "ist nicht gestattet."
+                    "ist nicht gestattet. Der Vorgang ist in ENAIO als sensibel gekennzeichnet."
                 ),
             )
 
