@@ -322,6 +322,7 @@ class EnaioBackend:
             "category": akte.property("Kategorisierung"),
             "creationDate": akte.property("Erstelldatum"),
             "topics": akte.property("Aktenplaneintrag").split("|"),
+            "access_restricted": bool(akte.property("Sensibel")),
         }
 
     @staticmethod
@@ -404,7 +405,7 @@ class EnaioBackend:
         objects = await self._search(
             "SELECT system:objectId, Erstelldatum, Aktenbezeichnung, "
             "Kategorisierung, Aktenverantwortlicher, Aktenplaneintrag, "
-            "Aktenzeichen, Aktentyp, Akteninhalt "
+            "Aktenzeichen, Aktentyp, Akteninhalt, Sensibel "
             "FROM OSTPL_AA "
             "WHERE Aktenzeichen=@aktenzeichen AND Aktentyp=@aktentyp",
             {"aktenzeichen": aktenzeichen, "aktentyp": STANDARD_CASE_TYPE},
@@ -437,7 +438,7 @@ class EnaioBackend:
         objects = await self._search(
             "SELECT system:objectId, Erstelldatum, Aktenzeichen, "
             "Aktenbezeichnung, Kategorisierung, Aktenplaneintrag, Aktenstatus, "
-            "Aktentyp "
+            "Aktentyp, Sensibel "
             "FROM OSTPL_AA "
             "WHERE Aktenverantwortlicher=@user AND Aktenstatus=@status "
             "AND Aktentyp=@aktentyp",
