@@ -21,6 +21,7 @@ def _search_response():
                     "Aktenverantwortlicher": {"value": "Sachbearbeiter"},
                     "Aktenplaneintrag": {"value": "A|B"},
                     "Aktentyp": {"value": "Standardakte"},
+                    "Sensibel": {"value": "0"},
                 }
             }
         ]

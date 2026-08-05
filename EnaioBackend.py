@@ -311,9 +311,20 @@ class EnaioBackend:
                 status_code=404, detail=f"{kind} '{identifier}' not found"
             )
         return objects[0]
-    
+
     @staticmethod
-    def _case_record(akte):
+    def _is_sensitive(value):
+        """Wertet das Feld ``Sensibel`` eines Vorgangs aus.
+
+        Enaio liefert den Wert als String (``"0"``/``"1"``). Nur der Wert 0 gilt
+        als nicht sensibel; leere oder fehlende Werte werden bewusst als sensibel
+        behandelt.
+        """
+
+        return str(value).strip() != "0"
+
+    @classmethod
+    def _case_record(cls, akte):
         """Baut die gemeinsamen Vorgangsfelder aus einem OSTPL_AA-Objekt."""
 
         return {
@@ -322,7 +333,7 @@ class EnaioBackend:
             "category": akte.property("Kategorisierung"),
             "creationDate": akte.property("Erstelldatum"),
             "topics": akte.property("Aktenplaneintrag").split("|"),
-            "access_restricted": bool(akte.property("Sensibel")),
+            "restricted": cls._is_sensitive(akte.property("Sensibel")),
         }
 
     @staticmethod
@@ -380,6 +391,58 @@ class EnaioBackend:
             "creationDate": child.property("system:creationDate"),
             "lastModificationDate": child.property("system:lastModificationDate"),
         }
+
+    async def _caseIsAccessible(self, parent_object_id, session_id=None):
+        """Prueft, ob die Inhalte eines Vorgangs gelesen werden duerfen.
+
+        Laedt das Objekt ueber ``GET /api/dms/objects/{id}`` und akzeptiert es nur
+        dann, wenn die Antwort genau dieses Objekt enthaelt und dessen Feld
+        ``Sensibel`` den Wert 0 traegt. Jede andere Situation - kein Treffer,
+        anderer Statuscode, unerwartete Antwortstruktur, fehlendes oder leeres
+        ``Sensibel`` - gilt als nicht zugaenglich.
+
+        :returns: ``True``, wenn der Vorgang gelesen werden darf, sonst ``False``.
+        """
+
+        context = f"Zugriffspruefung Vorgang {parent_object_id}"
+        response = await self._request(
+            "GET",
+            f"/api/dms/objects/{parent_object_id}",
+            context=context,
+            session_id=session_id,
+            raise_for_status=False,
+            headers={"accept": "application/json"},
+        )
+
+        if response.status_code != httpx.codes.OK:
+            self.logger.warning(
+                "Vorgang %s nicht lesbar (HTTP %s)",
+                parent_object_id,
+                response.status_code,
+            )
+            return False
+
+        try:
+            objects = [EnaioDict(obj) for obj in response.json()["objects"]]
+        except Exception:
+            # Unerwartete Antwortstruktur (kein JSON, kein "objects"-Feld, ...).
+            self.logger.exception("Unerwartete Antwort der ENAIO API bei %s", context)
+            return False
+
+        wanted = str(parent_object_id).strip()
+        for obj in objects:
+            try:
+                if str(obj.property("system:objectId")).strip() != wanted:
+                    continue
+                sensibel = obj.property("Sensibel")
+            except (KeyError, TypeError):
+                continue
+            return not self._is_sensitive(sensibel)
+
+        self.logger.warning(
+            "Vorgang %s in der Antwort der ENAIO API nicht enthalten", parent_object_id
+        )
+        return False
 
     async def _get_content(self, object_id, content_path, session_id=None):
         """Laedt einen Inhaltsstrom eines Objekts (Datei oder Rendition)."""
@@ -592,7 +655,24 @@ class EnaioBackend:
         return inbox
 
     async def get_document_list(self, parent_object_id, session_id=None):
-        """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg."""
+        """Sammelt alle Dokumente eines Vorgangs ueber alle Objekttypen hinweg.
+
+        Sensible Vorgaenge werden vorab ausgeschlossen; fuer sie wird keine
+        Dokumentliste ausgegeben.
+        """
+
+        if not await self._caseIsAccessible(parent_object_id, session_id=session_id):
+            self.logger.warning(
+                "Zugriff auf Vorgang %s verweigert (sensibel oder nicht lesbar)",
+                parent_object_id,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Zugriff auf die Dokumente des Vorgangs '{parent_object_id}' "
+                    "ist nicht gestattet."
+                ),
+            )
 
         documents = []
 

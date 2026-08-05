@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from EnaioBackend import OBJECT_TYPES, UPLOAD_OBJECT_TYPE_ID
 
 
-def _akte_object():
+def _akte_object(sensibel="0"):
     return {
         "properties": {
             "system:objectId": {"value": "PARENT123"},
@@ -20,6 +20,7 @@ def _akte_object():
             "Aktenverantwortlicher": {"value": "Sachbearbeiter"},
             "Aktenplaneintrag": {"value": "A|B"},
             "Aktentyp": {"value": "Standardakte"},
+            "Sensibel": {"value": sensibel},
         }
     }
 
@@ -37,8 +38,24 @@ def _running_case_object(
             "Aktenplaneintrag": {"value": topics},
             "Aktenstatus": {"value": "laufend"},
             "Aktentyp": {"value": "Standardakte"},
+            "Sensibel": {"value": "0"},
         }
     }
+
+
+def _case_detail_object(object_id="PARENT123", sensibel="0"):
+    """Antwortobjekt von ``GET /api/dms/objects/{id}`` fuer die Zugriffspruefung."""
+
+    properties = {"system:objectId": {"value": object_id}}
+    if sensibel is not None:
+        properties["Sensibel"] = {"value": sensibel}
+    return {"properties": properties}
+
+
+def _case_detail_response(objects):
+    return httpx.Response(
+        200, json={"objects": objects, "numItems": len(objects), "hasMoreItems": False}
+    )
 
 
 def _child_object(identifier, title):
@@ -142,6 +159,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "category": "Standard",
             "creationDate": "2022-03-04",
             "topics": ["Datenschutz", "OWi"],
+            "restricted": False,
             "status": "laufend",
             "object_id": "15645",
         },
@@ -151,6 +169,7 @@ async def test_get_running_cases_maps_records(make_backend):
             "category": "Standard",
             "creationDate": "2024-01-01",
             "topics": ["A", "B"],
+            "restricted": False,
             "status": "laufend",
             "object_id": "17776",
         },
@@ -324,10 +343,14 @@ async def test_get_rendition_returns_none_on_error_status(make_backend):
     assert await backend.get_rendition("OBJ1") is None
 
 
-async def test_get_document_list_queries_all_object_types(make_backend):
-    tables = []
+def _document_list_handler(tables, *, access_response):
+    """Handler fuer get_document_list: erst die Zugriffspruefung, dann die Suchen."""
 
     def handler(request):
+        if request.method == "GET":
+            assert request.url.path == "/api/dms/objects/PARENT123"
+            return access_response
+
         statement = json.loads(request.content)["query"]["statement"]
         table = statement.split(" FROM ")[1].split(" ")[0]
         tables.append(table)
@@ -336,7 +359,17 @@ async def test_get_document_list_queries_all_object_types(make_backend):
             return httpx.Response(200, json={"objects": [_child_object("2024-1", "Erstes")]})
         return httpx.Response(200, json={"objects": []})
 
-    backend = make_backend(handler)
+    return handler
+
+
+async def test_get_document_list_queries_all_object_types(make_backend):
+    tables = []
+    backend = make_backend(
+        _document_list_handler(
+            tables, access_response=_case_detail_response([_case_detail_object()])
+        )
+    )
+
     documents = await backend.get_document_list("PARENT123")
 
     assert tables == [t.table for t in OBJECT_TYPES.values()]
@@ -349,6 +382,78 @@ async def test_get_document_list_queries_all_object_types(make_backend):
             "lastModificationDate": "2024-01-02",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "access_response",
+    [
+        # Sensibler Vorgang.
+        _case_detail_response([_case_detail_object(sensibel="1")]),
+        # Leeres Feld 'Sensibel' gilt bewusst als sensibel.
+        _case_detail_response([_case_detail_object(sensibel="")]),
+        # Feld 'Sensibel' fehlt ganz.
+        _case_detail_response([_case_detail_object(sensibel=None)]),
+        # Antwort enthaelt einen anderen Vorgang.
+        _case_detail_response([_case_detail_object(object_id="ANDERE")]),
+        # Gar kein Objekt in der Antwort.
+        _case_detail_response([]),
+        # Unerwartete Antwortstruktur.
+        httpx.Response(200, json={"unerwartet": 1}),
+        # Vorgang nicht lesbar - kein Durchschlag als HTTP 502.
+        httpx.Response(404),
+    ],
+    ids=[
+        "sensibel",
+        "leer",
+        "feld_fehlt",
+        "andere_objectid",
+        "kein_objekt",
+        "kaputte_antwort",
+        "http_404",
+    ],
+)
+async def test_get_document_list_denies_inaccessible_case(make_backend, access_response):
+    tables = []
+    backend = make_backend(_document_list_handler(tables, access_response=access_response))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await backend.get_document_list("PARENT123")
+
+    assert excinfo.value.status_code == 403
+    assert "PARENT123" in excinfo.value.detail
+    # Ohne Zugriffsrecht wird gar nicht erst nach Dokumenten gesucht.
+    assert tables == []
+
+
+async def test_get_document_list_access_check_sends_session_cookie(make_backend):
+    """Die Zugriffspruefung laeuft mit derselben Session wie die Suchen."""
+
+    cookies = []
+
+    def handler(request):
+        cookies.append(request.headers.get("cookie"))
+        if request.method == "GET":
+            return _case_detail_response([_case_detail_object()])
+        return httpx.Response(200, json={"objects": []})
+
+    backend = make_backend(handler)
+    await backend.get_document_list("PARENT123", session_id="SESSION-1")
+
+    assert cookies[0] == "JSESSIONID=SESSION-1"
+    assert all(cookie == "JSESSIONID=SESSION-1" for cookie in cookies)
+
+
+@pytest.mark.parametrize(
+    ("sensibel", "expected"), [("0", False), ("1", True), ("", True)]
+)
+async def test_get_aktenzeichen_maps_restricted(make_backend, sensibel, expected):
+    backend = make_backend(
+        lambda request: httpx.Response(200, json={"objects": [_akte_object(sensibel)]})
+    )
+
+    _, record = await backend.get_aktenzeichen("DS.1.2-2024-1234")
+
+    assert record["restricted"] is expected
 
 
 async def test_connection_error_maps_to_503(make_backend):
