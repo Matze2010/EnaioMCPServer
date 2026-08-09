@@ -254,6 +254,8 @@ async def test_get_document_vermerk_uses_notiz_without_content_request(make_back
         "creationDate": "2024-01-01",
         "lastModificationDate": "2024-01-02",
         "content": "Inhalt des Vermerks",
+        "mime_type": "text/plain",
+        "filename": None,
     }
     # Nur die Suche, kein zusaetzlicher Content-Abruf.
     assert requests_seen == ["/api/dms/objects/search"]

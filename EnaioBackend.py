@@ -6,6 +6,7 @@ import re
 import unicodedata
 
 from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
 from typing import NamedTuple
 from fastapi import HTTPException
@@ -18,6 +19,12 @@ UPLOAD_OBJECT_TYPE_ID = "262146"
 DOCX_MIME_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+
+# MIME-Type, wenn Enaio zu einem Inhaltsstrom keinen Content-Type mitschickt.
+DEFAULT_MIME_TYPE = "application/octet-stream"
+
+# MIME-Type der Text-Repraesentationen (Rendition und Vermerk-Notiz).
+TEXT_MIME_TYPE = "text/plain"
 
 # Standardwert fuer handleDeletedDocuments in Suchanfragen.
 EXCLUDE_DELETED = "DELETED_DOCUMENTS_EXCLUDE"
@@ -103,6 +110,31 @@ def standardize_text(text: str) -> str:
     # Optionally truncate content if it's very large
     text = " ".join(text.split()[:5000])
     return text
+
+
+def _response_file_info(response) -> tuple[str, str | None]:
+    """Liest MIME-Type und Dateinamen aus den Headern einer Inhaltsantwort.
+
+    Enaio liefert den Content-Type oft mit angehaengten Parametern
+    (``application/pdf; charset=binary``); davon interessiert nur der Typ selbst.
+    Der Dateiname steckt im ``Content-Disposition`` und wird ueber
+    :class:`email.message.EmailMessage` geparst, damit auch die
+    RFC-2231-Variante ``filename*=UTF-8''...`` erkannt wird.
+
+    :returns: Tupel ``(mime_type, filename)``; ``filename`` ist ``None``, wenn
+        die Antwort keinen Dateinamen nennt.
+    """
+
+    mime_type = response.headers.get("content-type", "").split(";")[0].strip()
+
+    disposition = response.headers.get("content-disposition", "")
+    filename = None
+    if disposition:
+        message = EmailMessage()
+        message["Content-Disposition"] = disposition
+        filename = message.get_filename()
+
+    return mime_type or DEFAULT_MIME_TYPE, filename or None
 
 
 class EnaioDict(dict):
@@ -761,14 +793,26 @@ class EnaioBackend:
             title_field=object_type.title_field,
         )
 
+        # mime_type und filename beschreiben den geladenen Inhalt und werden von
+        # download_document gebraucht, um daraus eine MCP-Resource zu bauen.
+        # Ein Vermerk hat keine Datei, nur die Notiz als Klartext.
         if object_type.name == "vermerk":
             document["content"] = child.property("OSTPL_AA_AN_NOTIZ")
+            document["mime_type"] = TEXT_MIME_TYPE
+            document["filename"] = None
         else:
             object_id = child.property("system:objectId")
             if content_format == "file":
-                document["content"] = await self.get_file(object_id, session_id=session_id)
+                content, mime_type, filename = await self.get_file(
+                    object_id, session_id=session_id
+                )
+                document["content"] = content
+                document["mime_type"] = mime_type
+                document["filename"] = filename
             else:
                 document["content"] = await self.get_rendition(object_id, session_id=session_id)
+                document["mime_type"] = TEXT_MIME_TYPE
+                document["filename"] = None
 
         # Bewusst OHNE document["content"] loggen: der Inhalt kann Volltext
         # oder Binaerdaten (potenziell personenbezogen) enthalten.
@@ -777,8 +821,16 @@ class EnaioBackend:
         return document
 
     async def get_file(self, document_id, session_id=None):
+        """Laedt die Originaldatei eines Dokuments samt Beschreibung.
+
+        :returns: Tupel ``(content, mime_type, filename)``. ``mime_type`` faellt
+            auf ``DEFAULT_MIME_TYPE`` zurueck, ``filename`` ist ``None``, wenn
+            Enaio keinen Dateinamen mitschickt.
+        """
+
         response = await self._get_content(document_id, "file/1", session_id=session_id)
-        return response.content
+        mime_type, filename = _response_file_info(response)
+        return response.content, mime_type, filename
 
     async def get_rendition(self, document_id, session_id=None) -> str:
         response = await self._get_content(document_id, "renditions/text", session_id=session_id)
