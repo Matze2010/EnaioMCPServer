@@ -19,7 +19,7 @@ LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 
 # Logger der Anwendung, auf die das Level zusaetzlich explizit gesetzt wird
 # (Begruendung siehe configure_logging).
-APP_LOGGERS = ("EnaioBackend", "EnaioMCP")
+APP_LOGGERS = ("EnaioBackend", "EnaioMCP", "mistral_ocr")
 
 
 def resolve_log_level(raw: str | None = None) -> int:

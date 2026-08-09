@@ -59,6 +59,19 @@ async def test_access_document_fulltext_passes_session_id_to_backend(monkeypatch
     assert seen == [("DOC-1", "text", "SESSION-1")]
 
 
+async def test_access_document_fulltext_returns_content_unchanged(monkeypatch):
+    markdown = "# Prüfbericht\n\n| Feld | Wert |\n| --- | --- |\n| Größe | 3 |"
+
+    async def fake_get_document(document_id, content_format, session_id=None):
+        return {"content": markdown}
+
+    monkeypatch.setattr(EnaioMCP.backend, "get_document", fake_get_document)
+
+    # Der Volltext wird auf MCP-Ebene nicht mehr nachbearbeitet: Markdown,
+    # Umlaute und Gross-/Kleinschreibung erreichen den Client unveraendert.
+    assert await EnaioMCP.access_document_fulltext_session("DOC-1", "S", _Ctx()) == markdown
+
+
 def _document(**overrides):
     """Datensatz, wie ihn ``backend.get_document`` fuer eine Datei liefert."""
 

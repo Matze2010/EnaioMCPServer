@@ -31,7 +31,7 @@ hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
 | `list_users` | Alle Bearbeiter/Nutzer mit Kürzel (`name`), Name, eMail und Gruppen; gesperrte Konten und technische Konten ohne eMail-Adresse werden ausgefiltert |
 | `list_inbox` | Offene (ungelesene) Posteingänge des angemeldeten Nutzers aus dem Posteingangs-Workflow, neueste zuerst; je Eintrag mit `document_id` für `access_document_fulltext`/`download_document` |
 | `get_document_fields` | Listet je Dokumenttyp die optional manuell befüllbaren `fields`-Platzhalter für `create_case_document` |
-| `access_document_fulltext` | Volltext eines Dokuments als Klartext — zum Lesen, Zitieren, Auswerten |
+| `access_document_fulltext` | Volltext eines Dokuments als Klartext — zum Lesen, Zitieren, Auswerten; Quelle je nach `FULLTEXT_SOURCE` die Text-Rendition aus Enaio oder eine Mistral-OCR der Originaldatei |
 | `download_document` | Originaldatei eines Dokuments als eingebettete MCP-Resource (`type: "resource"`) mit MIME-Type und Dateiname aus Enaio; davor ein kurzer Textblock, der die Datei beschreibt |
 | `create_case_document` | Erzeugt ein `.docx` aus einer Hausvorlage und legt es dauerhaft im Vorgang ab; liefert `edit_link` zum sofortigen Bearbeiten |
 
@@ -67,6 +67,52 @@ Konfigurationsdatei.
 | `OUTPUT_DIR` | `./output` | Ausgabeverzeichnis für erzeugte Dokumente |
 | `UPLOAD_RATE_LIMIT_PER_MINUTE` | `30` | Max. Enaio-Uploads pro rollierender Minute; `<= 0` deaktiviert die Begrenzung |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` oder `CRITICAL` (Groß-/Kleinschreibung egal); unbekannte Werte fallen still auf `INFO` zurück |
+| `FULLTEXT_SOURCE` | `enaio` | Quelle des Volltextes: `enaio` nimmt die Text-Rendition aus Enaio, `mistral-ocr` liest die Originaldatei per OCR. Andere Werte verhindern den Start. |
+| `FULLTEXT_MAX_CHARS` | `40000` | Zeichenobergrenze des ausgelieferten Volltextes, unabhängig von der Quelle; `<= 0` deaktiviert die Kappung |
+| `MISTRAL_API_KEY` | – | API-Key für die Mistral-OCR. Fehlt er bei `FULLTEXT_SOURCE=mistral-ocr`, warnt der Server beim Start und bleibt bei der Enaio-Rendition |
+| `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | Modell-ID der OCR, z. B. ein datierter Snapshot wie `mistral-ocr-2503` |
+| `MISTRAL_API_URL` | `https://api.mistral.ai` | Basis-URL der Mistral-API (für ein Gateway bzw. einen Proxy); der Pfad `/v1/ocr` wird angehängt |
+| `MISTRAL_OCR_TIMEOUT` | `120` | Zeitlimit eines OCR-Aufrufs in Sekunden |
+| `MISTRAL_OCR_MAX_BYTES` | `52428800` | 50 MB — von Mistral dokumentierte Obergrenze; größere Dateien werden gar nicht erst übertragen |
+| `MISTRAL_OCR_MIME_TYPES` | `application/pdf,image/png,image/jpeg,image/jpg,image/tiff,image/webp,image/avif` | Kommaliste der per OCR gelesenen MIME-Types; alles andere fällt auf die Enaio-Rendition zurück |
+
+### Volltextquelle
+
+`access_document_fulltext` (und die Resource `document://{document}/fulltext`)
+liefert standardmäßig die Text-Rendition, die Enaio selbst zum Dokument
+vorhält. Mit `FULLTEXT_SOURCE=mistral-ocr` lädt der Server stattdessen die
+**Originaldatei** und lässt sie von der Mistral-OCR lesen; das Ergebnis ist
+Markdown mit Absätzen und Tabellen. Das lohnt vor allem bei gescannten PDFs, zu
+denen Enaio oft gar keine Rendition hat.
+
+Der Volltext fällt dabei nie aus:
+
+1. OCR der Originaldatei — sofern konfiguriert und die Datei geeignet ist,
+2. sonst die Text-Rendition aus Enaio,
+3. sonst kein Inhalt (wie bisher).
+
+Jeder OCR-Fehlschlag (fehlender Key, nicht erreichbare API, nicht unterstützter
+MIME-Type, Datei über `MISTRAL_OCR_MAX_BYTES`) landet als Warnung im Log und
+führt zum Rückfall auf Stufe 2. Eine abgelaufene SessionID ist davon
+ausgenommen: Sie wird wie überall als Authentifizierungsfehler gemeldet.
+
+Per Default gehen nur PDF und Bilder in die OCR. Für `.docx`, `.msg` und
+Ähnliches liefert Enaio selbst eine textnahe Rendition, die einer OCR überlegen
+ist; über `MISTRAL_OCR_MIME_TYPES` lässt sich die Liste anpassen. Mistral
+verarbeitet Dateien bis 50 MB und 1000 Seiten.
+
+Der Volltext wird **nicht mehr normiert**. Früher lief er durch
+`standardize_text()` — alles klein, Umlaute nach ASCII, jede Struktur zu
+Leerzeichen, Kappung nach 5000 Tokens. Diese Funktion ist stillgelegt (im Code
+auskommentiert erhalten); Groß-/Kleinschreibung, Umlaute und Zeilenumbrüche
+bleiben jetzt für **beide** Quellen erhalten. An ihre Stelle tritt allein die
+Längenbegrenzung `FULLTEXT_MAX_CHARS`, die auf der letzten Zeilengrenze kappt.
+
+> **Datenschutz:** Mit `FULLTEXT_SOURCE=mistral-ocr` verlassen vollständige
+> Dokumentinhalte das interne Netz und werden an `api.mistral.ai` übertragen.
+> Das ist eine Entscheidung über die Verarbeitung personenbezogener Daten, nicht
+> bloß ein Konfigurationsschalter — vor der Aktivierung entsprechend prüfen. Der
+> Standardwert `enaio` überträgt nichts nach außen.
 
 Zu den drei Web-URLs:
 
@@ -147,6 +193,18 @@ docker run -p 8000:8000 \
   enaio-mcp
 ```
 
+Mit Volltexterkennung über Mistral-OCR statt der Enaio-Rendition (siehe den
+Datenschutz-Hinweis unter [Volltextquelle](#volltextquelle)):
+
+```bash
+docker run -p 8000:8000 \
+  -e URL=https://enaio.example \
+  -e AUTH_MODE=session \
+  -e FULLTEXT_SOURCE=mistral-ocr \
+  -e MISTRAL_API_KEY=... \
+  enaio-mcp
+```
+
 ## Vorlagen
 
 `create_case_document` befüllt eine `.docx`-Hausvorlage, statt sie nachzubauen —
@@ -207,7 +265,8 @@ Die Tests kommen ohne erreichbares Enaio aus: HTTP-Zugriffe laufen über einen
 | Pfad | Inhalt |
 |------|--------|
 | `EnaioMCP.py` | MCP-Server: Tools, Resources, Konfiguration, Linkaufbau |
-| `EnaioBackend.py` | HTTP-Zugriff auf die Enaio-REST-API (Suche, Dokumente, Upload) |
+| `EnaioBackend.py` | HTTP-Zugriff auf die Enaio-REST-API (Suche, Dokumente, Upload) und die Volltextweiche |
+| `mistral_ocr.py` | Client der Mistral-OCR-API für die Volltexterkennung aus der Originaldatei |
 | `vorlage.py` | Befüllen der `.docx`-Vorlagen aus den Inhaltsblöcken |
 | `middleware/` | `x-enaio-*`-Header-Middleware und Request-Logging |
 | `rate_limiter.py` | Rollierendes Minutenlimit für Uploads |

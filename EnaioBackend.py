@@ -2,6 +2,10 @@ import json
 import uuid
 import httpx
 import logging
+
+# re und unicodedata werden aktuell nur von der stillgelegten Funktion
+# standardize_text gebraucht (siehe dort). Sie bleiben stehen, damit die
+# Funktion ohne weitere Aenderung wieder aktiviert werden kann.
 import re
 import unicodedata
 
@@ -10,6 +14,8 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import NamedTuple
 from fastapi import HTTPException
+
+from mistral_ocr import OCRUnavailable
 
 # Objekttyp-ID der Vorgangsdokumente (OSTPL_AA_DOKUMENT), unter der neu erzeugte
 # Dokumente in einen Vorgang eingehaengt werden.
@@ -67,6 +73,20 @@ SESSION_AUTH_FAILED_MESSAGE = (
     "Bitte wiederholen Sie den Aufruf mit einer aktuellen SessionID."
 )
 
+# Quellen des Dokumentvolltextes (Weiche ueber die Umgebungsvariable
+# FULLTEXT_SOURCE, ausgewertet in EnaioMCP): entweder die Text-Rendition, die
+# Enaio selbst vorhaelt, oder eine OCR der Originaldatei.
+FULLTEXT_SOURCE_ENAIO = "enaio"
+FULLTEXT_SOURCE_MISTRAL_OCR = "mistral-ocr"
+FULLTEXT_SOURCES = {FULLTEXT_SOURCE_ENAIO, FULLTEXT_SOURCE_MISTRAL_OCR}
+
+# Zeichenobergrenze des ausgelieferten Volltextes. Sie ersetzt die Kappung, die
+# frueher in standardize_text steckte, und gilt fuer beide Quellen.
+DEFAULT_FULLTEXT_MAX_CHARS = 40000
+
+# Hinweis am Ende eines gekappten Volltextes.
+TRUNCATION_MARKER = "\n\n[... gekuerzt ...]"
+
 
 class ObjectType(NamedTuple):
     """Beschreibt einen in Enaio abgefragten Objekttyp.
@@ -96,20 +116,50 @@ OBJECT_TYPES = {
 }
 
 
-def standardize_text(text: str) -> str:
-    # Convert text to lowercase
-    text = text.lower()
-    # replace carriage return newlines
-    text = text.replace("\r\n", " ")
-    text = text.replace("\r", "")
-    text = text.replace("\n", " ")
-    # Normalize unicode characters to ASCII
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8")
-    # Remove extra whitespace
-    text = re.sub(r"\W+", " ", text)
-    # Optionally truncate content if it's very large
-    text = " ".join(text.split()[:5000])
-    return text
+# standardize_text normierte den Volltext frueher hart: alles klein, Umlaute
+# ueber NFKD nach ASCII (also weg), jede Nichtwort-Folge zu einem Leerzeichen
+# und Kappung nach 5000 Tokens. Damit gingen Gross-/Kleinschreibung, Umlaute
+# und jede Struktur (Absaetze, Tabellen, Markdown der OCR) verloren. Der
+# Volltext wird deshalb nicht mehr normiert, sondern nur noch per
+# truncate_text auf eine Zeichenzahl begrenzt.
+#
+# Die Funktion ist vorerst nur stillgelegt, nicht entfernt:
+#
+# def standardize_text(text: str) -> str:
+#     # Convert text to lowercase
+#     text = text.lower()
+#     # replace carriage return newlines
+#     text = text.replace("\r\n", " ")
+#     text = text.replace("\r", "")
+#     text = text.replace("\n", " ")
+#     # Normalize unicode characters to ASCII
+#     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8")
+#     # Remove extra whitespace
+#     text = re.sub(r"\W+", " ", text)
+#     # Optionally truncate content if it's very large
+#     text = " ".join(text.split()[:5000])
+#     return text
+
+
+def truncate_text(text, max_chars: int):
+    """Begrenzt den Volltext auf ``max_chars`` Zeichen.
+
+    Gekappt wird zeichenweise und anschliessend bis zum letzten Zeilenumbruch
+    zurueck, damit der Text nicht mitten in einer Zeile (etwa einer
+    Markdown-Tabellenzeile) abbricht.
+
+    :param text: Der Volltext; ``None`` und Leerstring gehen unveraendert
+        durch, damit der Aufrufer "kein Inhalt" weiterhin erkennen kann.
+    :param max_chars: Obergrenze; ein Wert ``<= 0`` schaltet die Kappung ab.
+    """
+
+    if not text or max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    cut = text[:max_chars]
+    newline = cut.rfind("\n")
+
+    return (cut[:newline] if newline > 0 else cut) + TRUNCATION_MARKER
 
 
 def _response_file_info(response) -> tuple[str, str | None]:
@@ -171,7 +221,13 @@ def encode_multipart(parts, boundary: str) -> bytes:
 
 class EnaioBackend:
 
-    def __init__(self, url, auth_mode=AUTH_MODE_SESSION):
+    def __init__(
+        self,
+        url,
+        auth_mode=AUTH_MODE_SESSION,
+        ocr_client=None,
+        fulltext_max_chars=DEFAULT_FULLTEXT_MAX_CHARS,
+    ):
 
         self.backend_url = url
 
@@ -181,6 +237,13 @@ class EnaioBackend:
             )
         self.auth_mode = auth_mode
         self._basic_auth = None
+
+        # Die Volltextweiche haengt allein an diesem Attribut: Ist ein
+        # OCR-Client gesetzt, wird der Volltext per OCR aus der Originaldatei
+        # gewonnen, sonst aus der Text-Rendition von Enaio. Bewusst kein
+        # zusaetzlicher Modus-Parameter, der dazu im Widerspruch stehen koennte.
+        self.ocr_client = ocr_client
+        self.fulltext_max_chars = fulltext_max_chars
 
         self.session = httpx.AsyncClient(verify=False)
 
@@ -750,8 +813,9 @@ class EnaioBackend:
     async def get_document(self, document_id, content_format, session_id=None):
         """Laedt ein einzelnes Dokument inklusive Inhalt.
 
-        :param content_format: ``"file"`` fuer die Originaldatei, sonst die
-            Text-Rendition.
+        :param content_format: ``"file"`` fuer die Originaldatei, sonst den
+            Volltext - je nach Volltextweiche die Text-Rendition von Enaio oder
+            eine OCR der Originaldatei (siehe :meth:`get_text_rendition`).
         """
 
         # Die uebergebene Kennung kann zweierlei sein: die Fachnummer
@@ -810,7 +874,9 @@ class EnaioBackend:
                 document["mime_type"] = mime_type
                 document["filename"] = filename
             else:
-                document["content"] = await self.get_rendition(object_id, session_id=session_id)
+                document["content"] = await self.get_text_rendition(
+                    object_id, session_id=session_id
+                )
                 document["mime_type"] = TEXT_MIME_TYPE
                 document["filename"] = None
 
@@ -833,9 +899,17 @@ class EnaioBackend:
         return response.content, mime_type, filename
 
     async def get_rendition(self, document_id, session_id=None) -> str:
+        """Laedt die Text-Rendition, die Enaio selbst zum Dokument vorhaelt.
+
+        Der Text wird unveraendert durchgereicht: Umlaute, Gross-/Klein-
+        schreibung und Zeilenumbrueche bleiben erhalten (siehe die stillgelegte
+        Funktion ``standardize_text``). Die Laengenbegrenzung erfolgt zentral in
+        :meth:`get_text_rendition`.
+        """
+
         response = await self._get_content(document_id, "renditions/text", session_id=session_id)
         if response.status_code == httpx.codes.OK:
-            return standardize_text(response.text)
+            return response.text
 
         self.logger.warning(
             "Keine Text-Rendition fuer Dokument %s (HTTP %s)",
@@ -843,6 +917,59 @@ class EnaioBackend:
             response.status_code,
         )
         return None
+
+    async def get_ocr_rendition(self, document_id, session_id=None) -> str | None:
+        """Gewinnt den Volltext per OCR aus der Originaldatei.
+
+        :returns: Den OCR-Text oder ``None``, wenn OCR nicht konfiguriert oder
+            nicht moeglich ist; der Aufrufer faellt dann auf
+            :meth:`get_rendition` zurueck.
+        """
+
+        if self.ocr_client is None:
+            return None
+
+        # Bewusst _get_content statt get_file: get_file prueft den Statuscode
+        # nicht und wuerde bei HTTP 404 den Fehlerkoerper als Datei ausliefern.
+        response = await self._get_content(document_id, "file/1", session_id=session_id)
+        if response.status_code != httpx.codes.OK:
+            self.logger.warning(
+                "Keine Originaldatei fuer Dokument %s (HTTP %s) - OCR nicht moeglich",
+                document_id,
+                response.status_code,
+            )
+            return None
+
+        mime_type, _filename = _response_file_info(response)
+
+        # Nur OCRUnavailable abfangen: Eine HTTPException aus _request (etwa
+        # die abgelaufene SessionID bei HTTP 401) muss durchpropagieren und
+        # darf nicht als "OCR fehlgeschlagen" im Rueckfall verschwinden.
+        try:
+            return await self.ocr_client.extract_text(
+                response.content, mime_type, context=f"Dokument {document_id}"
+            )
+        except OCRUnavailable as e:
+            self.logger.warning(
+                "OCR fuer Dokument %s nicht moeglich (%s) - Rueckfall auf die Enaio-Rendition",
+                document_id,
+                e,
+            )
+            return None
+
+    async def get_text_rendition(self, document_id, session_id=None) -> str | None:
+        """Liefert den Volltext eines Dokuments gemaess der Volltextweiche.
+
+        Ist ein OCR-Client konfiguriert, wird zuerst die Originaldatei per OCR
+        gelesen; erst wenn das nicht moeglich ist, greift die Text-Rendition von
+        Enaio. Hier greift auch die gemeinsame Laengenbegrenzung beider Quellen.
+        """
+
+        text = await self.get_ocr_rendition(document_id, session_id=session_id)
+        if text is None:
+            text = await self.get_rendition(document_id, session_id=session_id)
+
+        return truncate_text(text, self.fulltext_max_chars)
 
     # ------------------------------------------------------------------
     # Upload
