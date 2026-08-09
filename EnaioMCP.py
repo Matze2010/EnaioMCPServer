@@ -2,6 +2,7 @@ import os
 import re
 import base64
 import json
+import logging
 import mimetypes
 
 from datetime import datetime
@@ -25,9 +26,21 @@ from EnaioBackend import (
         AUTH_MODES,
         AUTH_MODE_BASIC,
         AUTH_MODE_SESSION,
+        DEFAULT_FULLTEXT_MAX_CHARS,
         EnaioBackend,
+        FULLTEXT_SOURCES,
+        FULLTEXT_SOURCE_ENAIO,
+        FULLTEXT_SOURCE_MISTRAL_OCR,
         RUNNING_CASE_STATUS,
         UPLOAD_OBJECT_TYPE_ID,
+)
+from mistral_ocr import (
+        DEFAULT_BASE_URL,
+        DEFAULT_MAX_BYTES,
+        DEFAULT_MIME_TYPES,
+        DEFAULT_MODEL,
+        DEFAULT_TIMEOUT,
+        MistralOCRClient,
 )
 from rate_limiter import RateLimiter, RateLimitExceeded
 from logging_config import configure_logging
@@ -47,6 +60,11 @@ load_dotenv()
 # die Konfiguration erhalten.
 configure_logging()
 
+# Logger-Name fest verdrahtet statt __name__: beim Start ueber
+# "python EnaioMCP.py" waere __name__ sonst "__main__" und das LOG_LEVEL aus
+# logging_config.APP_LOGGERS wuerde diesen Logger nicht erreichen.
+logger = logging.getLogger("EnaioMCP")
+
 url = os.environ.get('URL', 'DEFAULT_URL')
 username = os.environ.get('USERNAME', 'DEFAULT_USERNAME')
 password = os.environ.get('PASSWORD', 'DEFAULT_PASSWORD')
@@ -57,7 +75,62 @@ if AUTH_MODE not in AUTH_MODES:
 AUTH_TAG_BASIC = f"auth:{AUTH_MODE_BASIC}"
 AUTH_TAG_SESSION = f"auth:{AUTH_MODE_SESSION}"
 
-backend = EnaioBackend(url=url, auth_mode=AUTH_MODE)
+# Volltextweiche: 'enaio' nimmt die Text-Rendition, die Enaio selbst vorhaelt,
+# 'mistral-ocr' laedt stattdessen die Originaldatei und liest sie per OCR.
+# Ein unbekannter Wert verhindert den Start - wie bei AUTH_MODE.
+FULLTEXT_SOURCE = os.environ.get("FULLTEXT_SOURCE", FULLTEXT_SOURCE_ENAIO).strip().lower()
+if FULLTEXT_SOURCE not in FULLTEXT_SOURCES:
+        allowed = ", ".join(sorted(FULLTEXT_SOURCES))
+        raise RuntimeError(
+                f"Ungueltige FULLTEXT_SOURCE '{FULLTEXT_SOURCE}'. Erlaubt sind: {allowed}."
+        )
+
+# Zeichenobergrenze des ausgelieferten Volltextes, unabhaengig von der Quelle.
+FULLTEXT_MAX_CHARS = int(
+        os.environ.get("FULLTEXT_MAX_CHARS", str(DEFAULT_FULLTEXT_MAX_CHARS))
+)
+
+
+def _ocr_mime_types():
+        """Liest die per OCR gelesenen MIME-Types aus MISTRAL_OCR_MIME_TYPES."""
+
+        raw = os.environ.get("MISTRAL_OCR_MIME_TYPES", "")
+        mime_types = tuple(entry.strip().lower() for entry in raw.split(",") if entry.strip())
+
+        return mime_types or DEFAULT_MIME_TYPES
+
+
+# Der OCR-Client entsteht nur, wenn die Weiche auf mistral-ocr steht UND ein
+# Key vorliegt. Ohne Key waere jeder Volltextabruf ein sinnloser Download der
+# Originaldatei mit anschliessendem Rueckfall - deshalb einmal warnen und aus.
+ocr_client = None
+if FULLTEXT_SOURCE == FULLTEXT_SOURCE_MISTRAL_OCR:
+        MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "").strip()
+        if not MISTRAL_API_KEY:
+                logger.warning(
+                        "FULLTEXT_SOURCE=%s, aber MISTRAL_API_KEY ist nicht gesetzt - "
+                        "der Volltext kommt weiterhin aus der Enaio-Text-Rendition.",
+                        FULLTEXT_SOURCE_MISTRAL_OCR,
+                )
+        else:
+                ocr_client = MistralOCRClient(
+                        MISTRAL_API_KEY,
+                        model=os.environ.get("MISTRAL_OCR_MODEL", DEFAULT_MODEL),
+                        base_url=os.environ.get("MISTRAL_API_URL", DEFAULT_BASE_URL),
+                        timeout=float(os.environ.get("MISTRAL_OCR_TIMEOUT", str(DEFAULT_TIMEOUT))),
+                        max_bytes=int(
+                                os.environ.get("MISTRAL_OCR_MAX_BYTES", str(DEFAULT_MAX_BYTES))
+                        ),
+                        mime_types=_ocr_mime_types(),
+                )
+                logger.info("Volltextquelle: Mistral OCR (Modell %s)", ocr_client.model)
+
+backend = EnaioBackend(
+        url=url,
+        auth_mode=AUTH_MODE,
+        ocr_client=ocr_client,
+        fulltext_max_chars=FULLTEXT_MAX_CHARS,
+)
 if AUTH_MODE == AUTH_MODE_BASIC:
         backend.set_auth(username, password)
 
@@ -580,7 +653,8 @@ async def _load_document(
         """Laedt ein Dokument in der gewuenschten Repraesentation.
 
         :param content_format: ``"file"`` fuer die Originaldatei (bytes), sonst
-            die Text-Rendition (str).
+            den Volltext (str) - je nach ``FULLTEXT_SOURCE`` die Text-Rendition
+            von Enaio oder eine Mistral-OCR der Originaldatei.
         :returns: Der Datensatz des Backends inklusive ``content``, ``mime_type``
             und ``filename``.
         """
