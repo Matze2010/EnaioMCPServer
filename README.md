@@ -32,7 +32,7 @@ hin, den Aufruf mit einer aktuellen SessionID zu wiederholen.
 | `list_inbox` | Offene (ungelesene) Posteingänge des angemeldeten Nutzers aus dem Posteingangs-Workflow, neueste zuerst; je Eintrag mit `document_id` für `access_document_fulltext`/`download_document` |
 | `get_document_fields` | Listet je Dokumenttyp die optional manuell befüllbaren `fields`-Platzhalter für `create_case_document` |
 | `access_document_fulltext` | Volltext eines Dokuments als Klartext — zum Lesen, Zitieren, Auswerten |
-| `download_document` | Originaldatei eines Dokuments, Base64-kodiert |
+| `download_document` | Originaldatei eines Dokuments als eingebettete MCP-Resource (`type: "resource"`) mit MIME-Type und Dateiname aus Enaio; davor ein kurzer Textblock, der die Datei beschreibt |
 | `create_case_document` | Erzeugt ein `.docx` aus einer Hausvorlage und legt es dauerhaft im Vorgang ab; liefert `edit_link` zum sofortigen Bearbeiten |
 
 `create_case_document` schreibt in Enaio und ist entsprechend als

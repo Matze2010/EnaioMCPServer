@@ -2,6 +2,7 @@ import os
 import re
 import base64
 import json
+import mimetypes
 
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,12 @@ from dotenv import load_dotenv
 
 from fastmcp import FastMCP, Context
 from fastmcp.tools.tool import ToolAnnotations
+from mcp.types import (
+        BlobResourceContents,
+        EmbeddedResource,
+        TextContent,
+        TextResourceContents,
+)
 from pydantic import BeforeValidator, Field
 from typing import Annotated, Optional
 from fastapi import HTTPException
@@ -343,6 +350,70 @@ def _sanitize_filename(text: str) -> str:
         return re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip()).strip("._") or "dokument"
 
 
+def _document_filename(document: dict, mime_type: str) -> str:
+        """Bestimmt den Dateinamen, unter dem ein Dokument ausgeliefert wird.
+
+        Bevorzugt wird der Name aus dem ``Content-Disposition`` der Enaio-Antwort.
+        Fehlt er, wird der Betreff des Dokuments genommen und die Endung aus dem
+        MIME-Type abgeleitet.
+        """
+
+        filename = document.get("filename")
+        if filename:
+                return _sanitize_filename(filename)
+
+        name = _sanitize_filename(document.get("name"))
+        if "." in name:
+                return name
+
+        return f"{name}{mimetypes.guess_extension(mime_type) or ''}"
+
+
+def _document_file_blocks(document: dict) -> list[TextContent | EmbeddedResource]:
+        """Baut aus einem geladenen Dokument die MCP-Content-Bloecke fuer den Download.
+
+        Die Datei wird als eingebettete Resource (``type: "resource"``) geliefert
+        statt als Base64-Text, damit MCP-Clients sie als Datei behandeln koennen
+        und der Binaerinhalt nicht im Kontext des Modells landet. Der
+        vorangestellte Textblock beschreibt die Datei, weil ein Client aus einer
+        reinen Resource sonst nichts an das Modell weitergibt.
+        """
+
+        content = document.get("content")
+        if content is None:
+                raise HTTPException(
+                        status_code=404,
+                        detail="Zum Dokument ist keine Datei hinterlegt.",
+                )
+
+        mime_type = document.get("mime_type") or "application/octet-stream"
+        filename = _document_filename(document, mime_type)
+        uri = f"file:///{filename}"
+
+        # Vermerke tragen ihre Notiz als Klartext; nur echte Dateien werden
+        # Base64-kodiert als Blob uebertragen.
+        if isinstance(content, str):
+                resource = TextResourceContents(uri=uri, mimeType=mime_type, text=content)
+                size = len(content.encode("utf-8"))
+        else:
+                resource = BlobResourceContents(
+                        uri=uri,
+                        mimeType=mime_type,
+                        blob=base64.b64encode(content).decode("ascii"),
+                )
+                size = len(content)
+
+        summary = (
+                f"Dokument '{document.get('name') or filename}' geladen: "
+                f"{filename} ({mime_type}, {size} Bytes)."
+        )
+
+        return [
+                TextContent(type="text", text=summary),
+                EmbeddedResource(type="resource", resource=resource),
+        ]
+
+
 def _dms_link(object_id) -> Optional[str]:
         """Baut den Link auf einen Vorgang im Enaio-Web-Client (osweb).
 
@@ -503,19 +574,29 @@ async def _discard_temp_file(path, ctx: Context):
                 await ctx.info(f"Warnung: temporaere Datei {path} konnte nicht geloescht werden: {e}")
 
 
-async def _load_document_content(
+async def _load_document(
         document_id: str, content_format: str, session_id: str | None, ctx: Context
-):
-        """Laedt den Inhalt eines Dokuments in der gewuenschten Repraesentation.
+) -> dict:
+        """Laedt ein Dokument in der gewuenschten Repraesentation.
 
         :param content_format: ``"file"`` fuer die Originaldatei (bytes), sonst
             die Text-Rendition (str).
+        :returns: Der Datensatz des Backends inklusive ``content``, ``mime_type``
+            und ``filename``.
         """
 
         what = "Datei" if content_format == "file" else "Textinhalt"
         await ctx.info(f"Lade {what} zum Dokument {document_id}")
 
-        document = await backend.get_document(document_id, content_format, session_id=session_id)
+        return await backend.get_document(document_id, content_format, session_id=session_id)
+
+
+async def _load_document_content(
+        document_id: str, content_format: str, session_id: str | None, ctx: Context
+):
+        """Laedt nur den Inhalt eines Dokuments (siehe :func:`_load_document`)."""
+
+        document = await _load_document(document_id, content_format, session_id, ctx)
         return document["content"]
 
 
@@ -1242,18 +1323,18 @@ async def download_document_session(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
         SessionID: Annotated[str, SESSION_ID_DESCRIPTION],
         ctx: Context,
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
         """
-        Lädt ein Dokument als Originaldatei herunter (Base64-kodierter Binärinhalt),
-        z. B. um es weiterzuleiten oder als Anhang bereitzustellen.
+        Lädt ein Dokument als Originaldatei herunter und gibt es als eingebettete
+        Resource zurück, z. B. um es weiterzuleiten oder als Anhang bereitzustellen.
 
         Verwende dieses Tool (nicht access_document_fulltext), wenn die Originaldatei
         selbst benötigt wird, nicht nur ihr Textinhalt.
         """
 
-        content = await _load_document_content(document, "file", SessionID, ctx)
+        record = await _load_document(document, "file", SessionID, ctx)
 
-        return base64.b64encode(content).decode("ascii")
+        return _document_file_blocks(record)
 
 
 @mcp.tool(
@@ -1266,7 +1347,7 @@ async def download_document_session(
 async def download_document_basic(
         document: Annotated[str, "Dokument-ID, z. B. aus dem 'documents'-Feld von get_case_metadata."],
         ctx: Context,
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
         return await download_document_session(document, None, ctx)
 
 
